@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+# Serializes Release runs so two near-simultaneous CI completions for the
+# same version can't both pass the idempotency check before either has
+# created the release.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # workflow_run fires on every completion regardless of pass/fail, so we
+    # must gate on conclusion explicitly. head_branch is checked redundantly
+    # here (in addition to the top-level `branches:` filter above) because
+    # workflow_run's branch filtering is documented to behave unexpectedly
+    # for pull_request-triggered upstream runs.
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # Check out the EXACT commit CI validated, not whatever main HEAD is
+      # by the time this job runs — main may have moved further already.
+      - name: Checkout commit CI passed on
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # Mirrors ci/check-version-sync.sh's exact pom.xml parsing (same
+      # namespace, same find(), same .text.strip()) so this never drifts
+      # from what that script considers authoritative.
+      - name: Extract version from pom.xml
+        id: version
+        run: |
+          VERSION="$(python3 - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+          root = ET.parse("pom.xml").getroot()
+          el = root.find("m:version", ns)
+          if el is None or not el.text:
+              sys.exit("ERROR: could not find /project/version in pom.xml")
+          print(el.text.strip())
+          PY
+          )"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      - name: Check for existing release
+        id: check
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — nothing to do, skipping."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No release $TAG found yet — will create it."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Cheap safety re-checks before tagging. No Maven/JDK build needed —
+      # CI already ran the full build.sh/check-jar-freshness.sh cycle on
+      # this exact commit; these two just re-assert the two properties that
+      # matter for a *release* specifically: the shipped jar's checksum is
+      # correct, and the three version declarations agree.
+      - name: Re-verify committed jar checksum
+        if: steps.check.outputs.exists == 'false'
+        run: sha256sum -c lib/jfrdoc-mcp.jar.sha256
+
+      - name: Re-verify version sync
+        if: steps.check.outputs.exists == 'false'
+        run: ./ci/check-version-sync.sh
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          NOTES="$(cat <<'EOF'
+          ## Install
+
+          ```
+          /plugin marketplace add roz-labs/jfrdoctor-plugin
+          /plugin install jfrdoc@roz-labs
+          ```
+
+          ## Requirements
+
+          - JDK 21+ on PATH
+          EOF
+          )"
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.event.workflow_run.head_sha }}" \
+            --title "jfrdoc ${{ steps.version.outputs.version }}" \
+            --notes "$NOTES" \
+            --generate-notes
