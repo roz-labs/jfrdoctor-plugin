@@ -79,7 +79,7 @@ public class JfrIoTool implements Tool {
         try {
             return analyze(path, topN).toString(2);
         } catch (IOException e) {
-            return "Error: Could not read JFR file: " + e.getMessage();
+            return "Error: Could not read JFR file (" + e.getClass().getSimpleName() + ")";
         }
     }
 
@@ -126,6 +126,7 @@ public class JfrIoTool implements Tool {
                 if (isFileRead || isFileWrite) {
                     String filePath = tryGetString(e, "path");
                     if (filePath == null || filePath.isEmpty()) filePath = "<unknown>";
+                    else filePath = Redaction.redactHomeDirUser(filePath);
 
                     long bytes;
                     if (isFileRead) {
@@ -173,7 +174,9 @@ public class JfrIoTool implements Tool {
                     stats.totalNanos += ns;
                     stats.totalBytes += bytes;
                     if (ns > stats.maxNanos) stats.maxNanos = ns;
-                    if (stats.address == null && address != null && !address.isEmpty()) stats.address = address;
+                    if (stats.address == null && address != null && !address.isEmpty()) {
+                        stats.address = Redaction.maskIpLastOctet(address);
+                    }
                     String site = topFrameSignature(e.getStackTrace());
                     if (site != null) stats.callSiteCounts.merge(site, 1L, Long::sum);
 
@@ -198,7 +201,7 @@ public class JfrIoTool implements Tool {
         var result = new JsonObject();
 
         var recording = new JsonObject()
-                .put("path", path.toAbsolutePath().toString())
+                .put("path", path.toString())
                 .put("duration_seconds", round1(durationSeconds));
         result.put("recording", recording);
 

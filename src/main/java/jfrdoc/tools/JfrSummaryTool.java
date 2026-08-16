@@ -49,7 +49,7 @@ public class JfrSummaryTool implements Tool {
         try {
             return summarize(path).toString(2);
         } catch (IOException e) {
-            return "Error: Could not read JFR file: " + e.getMessage();
+            return "Error: Could not read JFR file (" + e.getClass().getSimpleName() + ")";
         }
     }
 
@@ -141,18 +141,15 @@ public class JfrSummaryTool implements Tool {
     }
 
     /**
-     * Matches -D<key>=<value> system properties whose key looks like it holds
-     * a credential, so jvmArguments/javaArguments (verbatim JVM startup
-     * flags, always emitted since they explain framework/container context)
-     * don't leak a plaintext -Dspring.datasource.password=... etc. into the
-     * model's context. Heuristic, not exhaustive — flags the common cases.
+     * Redacts credential-shaped -D/--/bare key=value pairs, URL userinfo
+     * credentials, and email addresses from jvmArguments/javaArguments
+     * (verbatim JVM startup + program args, always emitted since they
+     * explain framework/container context) before they reach the model.
+     * Delegates to Redaction so the same patterns are shared with
+     * jfr_exceptions' sample_message. Heuristic, not exhaustive.
      */
-    static final java.util.regex.Pattern SENSITIVE_SYSTEM_PROPERTY = java.util.regex.Pattern.compile(
-            "(-D[^=\\s]*(?:password|secret|token|credential|apikey|api_key|auth)[^=\\s]*=)(\\S+)",
-            java.util.regex.Pattern.CASE_INSENSITIVE);
-
     static String redactSecrets(String args) {
-        return SENSITIVE_SYSTEM_PROPERTY.matcher(args).replaceAll("$1[REDACTED]");
+        return Redaction.redactSecretsAndPii(args);
     }
 
     static JsonObject readJvmInfo(jdk.jfr.consumer.RecordedEvent e) {

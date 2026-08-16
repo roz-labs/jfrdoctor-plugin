@@ -101,13 +101,13 @@ public class JfrExceptionsTool implements Tool {
         try {
             categorizer = FrameworkCategorizer.forFramework(framework);
         } catch (IOException e) {
-            return "Error: Could not load categorization rules: " + e.getMessage();
+            return "Error: Could not load categorization rules (" + e.getClass().getSimpleName() + ")";
         }
 
         try {
             return analyze(path, topN, framework, categorizer).toString(2);
         } catch (IOException e) {
-            return "Error: Could not read JFR file: " + e.getMessage();
+            return "Error: Could not read JFR file (" + e.getClass().getSimpleName() + ")";
         }
     }
 
@@ -176,7 +176,11 @@ public class JfrExceptionsTool implements Tool {
                 var cstats = classAgg.computeIfAbsent(className, k -> new ExceptionClassStats());
                 cstats.events++;
                 if (cstats.sampleMessage == null && message != null && !message.isEmpty()) {
-                    cstats.sampleMessage = message;
+                    // The application's own exception message is freeform text and
+                    // can carry emails, secrets, or credential-bearing URLs (e.g. a
+                    // connection-refused message embedding a JDBC URL) — redact
+                    // before it ever reaches the model's context.
+                    cstats.sampleMessage = Redaction.redactSecretsAndPii(message);
                 }
 
                 RecordedStackTrace trace = e.getStackTrace();
@@ -251,7 +255,7 @@ public class JfrExceptionsTool implements Tool {
         var result = new JsonObject();
 
         var recording = new JsonObject()
-                .put("path", path.toAbsolutePath().toString())
+                .put("path", path.toString())
                 .put("duration_seconds", round1(durationSeconds));
         result.put("recording", recording);
 

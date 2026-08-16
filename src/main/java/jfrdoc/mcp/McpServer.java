@@ -128,9 +128,22 @@ public final class McpServer {
                 .build();
     }
 
+    // Belt-and-suspenders: every jfrdoc tool only ever reads a local file via
+    // Path.of()/Files, so neither of these is exploitable today — but
+    // rejecting them explicitly, before the path ever reaches the filesystem
+    // or the JFR parser, beats relying on Path/IO calls to fail incidentally.
+    static final java.util.regex.Pattern URL_SCHEME =
+            java.util.regex.Pattern.compile("^[A-Za-z][A-Za-z0-9+.-]*://");
+
     /** Every jfrdoc tool takes a `path`; only .jfr files are legitimate input. */
     static String validateJfrPath(Map<String, Object> arguments) {
         if (!(arguments.get("path") instanceof String path)) return null;
+        if (URL_SCHEME.matcher(path).find()) {
+            return "Error: path must be a local filesystem path, not a URL (got: " + path + ")";
+        }
+        if (path.contains("..")) {
+            return "Error: path must not contain '..' path-traversal segments";
+        }
         if (!path.toLowerCase(Locale.ROOT).endsWith(".jfr")) {
             return "Error: only .jfr files are accepted (got: " + path + ")";
         }
@@ -150,7 +163,12 @@ public final class McpServer {
             // that an escaped Error hangs this SDK version's callHandler
             // dispatch indefinitely instead of failing the request, so it must
             // never leave this method uncaught.
-            return "Error: " + tool.toolName() + " failed: " + t;
+            //
+            // Only the exception's class name is returned, never t.getMessage()
+            // or t.toString() — a malformed/adversarial recording could cause a
+            // parser exception whose message embeds fragments of file content,
+            // and that must never reach the calling model's context.
+            return "Error: " + tool.toolName() + " failed (" + t.getClass().getSimpleName() + ")";
         } finally {
             long millis = (System.nanoTime() - start) / 1_000_000;
             System.err.println(tool.toolName() + " " + outcome + " in " + millis + " ms");
