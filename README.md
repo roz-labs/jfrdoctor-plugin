@@ -28,14 +28,16 @@ The tools are a local process (`java -jar`), so they need a machine to run on:
 
 | Surface | Skill | The nine tools |
 |-|-|-|
-| Claude Code (CLI) | ✅ | ✅ |
-| Claude Desktop — **Code** tab | ✅ | ✅ |
-| Claude Desktop — **Chat** / **Cowork** | ✅ | ✅ |
+| Claude Code (CLI) | ✅ | ✅ tested |
+| Claude Desktop — **Code** tab | ✅ | ✅ same runtime as the CLI |
+| Cowork — local session | ✅ | ⚠️ expected to work, not tested |
+| Cowork — remote session | ✅ loads | ❌ cannot run |
 | claude.ai in a browser | ✅ loads | ❌ cannot run |
 
-In a browser there is no local JVM and no local `.jfr` file, so the skill loads
-but every tool it calls is missing and no report can be produced. Use jfrdoc from
-Claude Code or the Claude Desktop app.
+Wherever Claude runs in the cloud rather than on your machine — a browser session,
+or a remote Cowork session — there is no local JVM and no local `.jfr` file, so the
+skill loads but every tool it calls is missing and no report can be produced. Use
+jfrdoc from Claude Code or the Claude Desktop app.
 
 ## How it's put together
 
