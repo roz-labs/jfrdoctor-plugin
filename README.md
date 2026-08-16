@@ -13,15 +13,29 @@ and concrete, evidence-backed recommendations.
 <a href="https://github.com/roz-labs/jfrdoctor-plugin/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/roz-labs/jfrdoctor-plugin?label=release"></a>
 </p>
 
-> 🚧 **Proof of concept.** jfrdoc is a Claude Code plugin: an MCP server
-> exposing nine JFR analysis tools, plus a skill that drives them into a
-> fixed report shape. No API key, no agent framework — the server is built
-> on the official [MCP Java SDK](https://github.com/modelcontextprotocol/java-sdk)
-> and ships as a single self-contained jar, so *using* the plugin needs
-> nothing beyond a JDK. Building it from source needs Maven — see
-> [Development](#development).
+jfrdoc is a plugin: an MCP server exposing nine JFR analysis tools, plus a skill
+that drives them into a fixed report shape. No API key, no agent framework — the
+server is built on the official
+[MCP Java SDK](https://github.com/modelcontextprotocol/java-sdk) and ships as a
+single self-contained jar, so *using* the plugin needs nothing beyond a JDK.
+Building it from source needs Maven — see [Development](#development).
 
 ---
+
+## Where this runs
+
+The tools are a local process (`java -jar`), so they need a machine to run on:
+
+| Surface | Skill | The nine tools |
+|-|-|-|
+| Claude Code (CLI) | ✅ | ✅ |
+| Claude Desktop — **Code** tab | ✅ | ✅ |
+| Claude Desktop — **Chat** / **Cowork** | ✅ | ✅ |
+| claude.ai in a browser | ✅ loads | ❌ cannot run |
+
+In a browser there is no local JVM and no local `.jfr` file, so the skill loads
+but every tool it calls is missing and no report can be produced. Use jfrdoc from
+Claude Code or the Claude Desktop app.
 
 ## How it's put together
 
@@ -98,32 +112,18 @@ Prerequisite: **JDK 21+ and Maven** on `PATH`.
 ./ci/check-version-sync.sh     # pom.xml / plugin.json / McpServer.java agree
 ```
 
-## Demo recording
-
-`samples/sample.jfr` is generated, never committed. JFR's `profile` settings
-record `jdk.InitialEnvironmentVariable` (every environment variable, **with its
-value**) and `jdk.SystemProcess` (every process on the machine, full command
-line) for the whole host — not just the profiled workload. A recording made on a
-developer box or in CI therefore carries credentials, tokens and private paths
-that have nothing to do with the demo.
-
-`samples/gen-sample.sh` disables those three host-describing event types, none of
-which any jfrdoc tool reads. `ci/check-sample-privacy.sh` enforces both halves in
-CI: no `.jfr` may be tracked by git, and any recording on disk must contain zero
-events of those types.
-
 To try the server against a project without installing the plugin:
 
 ```bash
 claude mcp add jfrdoc -- java -jar "$PWD/lib/jfrdoc-mcp.jar"
 ```
 
-Source layout (standard Maven): `src/main/java/jfrdoc/json` (minimal JSON
-reader/writer, vendored — used to build each tool's output, unrelated to
-wire-protocol parsing), `src/main/java/jfrdoc/tools` (the nine analyzers +
-framework categorizer, unchanged since the MCP SDK migration),
+Source layout (standard Maven): `src/main/java/jfrdoc/json` (a minimal JSON
+*writer* plus a `Map` adapter — used to build each tool's output; it has no
+parser, since the SDK owns wire-protocol parsing),
+`src/main/java/jfrdoc/tools` (the nine analyzers + framework categorizer),
 `src/main/java/jfrdoc/mcp` (the SDK wiring — tool registration, argument
-adaptation, ~120 lines), `src/main/resources/frameworks` (package-prefix
+adaptation, ~160 lines), `src/main/resources/frameworks` (package-prefix
 lists for CPU/allocation attribution).
 
 **Why the official SDK instead of a hand-rolled JSON-RPC loop:** an earlier
@@ -137,6 +137,35 @@ of bug for free — the SDK's own Jackson-based parser and session handling now
 own it — at the cost of a real dependency tree (Maven, Jackson, Reactor) and
 a ~6 MB jar instead of ~100 KB. Two smaller findings surfaced during
 migration and are tracked as known limitations below.
+
+## Demo recording
+
+`samples/sample.jfr` is generated, never committed. JFR's `profile` settings
+record three event types that describe the **host**, not the profiled workload:
+`jdk.InitialEnvironmentVariable` (every environment variable, **with its value**),
+`jdk.SystemProcess` (every process on the machine, full command line), and
+`jdk.InitialSystemProperty`. A recording made on a developer box or in CI
+therefore carries credentials, tokens and private paths that have nothing to do
+with the demo.
+
+`samples/gen-sample.sh` disables all three, none of which any jfrdoc tool reads.
+`ci/check-sample-privacy.sh` enforces both halves in CI: no `.jfr` may be tracked
+by git, and any recording on disk must contain zero events of those types.
+
+## Verifying the binary
+
+`lib/jfrdoc-mcp.jar` is committed so the plugin works the moment it's installed —
+the marketplace doesn't build from source. Everything needed to check that jar
+against this repo's source is in the repo:
+
+```bash
+sha256sum -c lib/jfrdoc-mcp.jar.sha256   # jar matches its committed checksum
+./ci/check-jar-freshness.sh              # jar's classes match a fresh mvn package
+./build.sh                               # rebuild it yourself
+```
+
+CI runs the first two on every push, so a jar that drifts from `src/` fails the
+build.
 
 ## Honest limitations
 
