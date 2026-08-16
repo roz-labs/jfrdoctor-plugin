@@ -80,7 +80,7 @@ public class JfrMemoryTool implements Tool {
         try {
             return analyze(path, containerMb, defaultStackKb).toString(2);
         } catch (IOException e) {
-            return "Error: Could not read JFR file: " + e.getMessage();
+            return "Error: Could not read JFR file (" + e.getClass().getSimpleName() + ")";
         }
     }
 
@@ -219,7 +219,7 @@ public class JfrMemoryTool implements Tool {
         var result = new JsonObject();
 
         result.put("recording", new JsonObject()
-                .put("path", path.toAbsolutePath().toString())
+                .put("path", path.toString())
                 .put("duration_seconds", round1(durationSeconds)));
 
         var ctx = new JsonObject();

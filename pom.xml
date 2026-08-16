@@ -48,6 +48,19 @@
                     <exclude>META-INF/*.SF</exclude>
                     <exclude>META-INF/*.DSA</exclude>
                     <exclude>META-INF/*.RSA</exclude>
+
+                    <!-- jfrdoc is stdio-only (McpServer.java only ever
+                         constructs StdioServerTransportProvider). The MCP
+                         SDK's client package and HTTP/SSE-based server
+                         transports are never instantiated; excluding them
+                         shrinks the shipped jar's attack surface without
+                         touching any code path this plugin uses.
+                         reactor/** is deliberately NOT excluded: disassembly
+                         of the shipped jar confirmed StdioServerTransportProvider
+                         and McpSyncServer both depend on it directly. -->
+                    <exclude>io/modelcontextprotocol/client/**</exclude>
+                    <exclude>io/modelcontextprotocol/server/transport/Http*</exclude>
+                    <exclude>io/modelcontextprotocol/server/transport/*Sse*</exclude>
                   </excludes>
                 </filter>
               </filters>

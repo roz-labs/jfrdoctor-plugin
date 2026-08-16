@@ -89,13 +89,13 @@ public class JfrAllocationTool implements Tool {
         try {
             categorizer = FrameworkCategorizer.forFramework(framework);
         } catch (IOException e) {
-            return "Error: Could not load categorization rules: " + e.getMessage();
+            return "Error: Could not load categorization rules (" + e.getClass().getSimpleName() + ")";
         }
 
         try {
             return analyze(path, topN, framework, categorizer).toString(2);
         } catch (IOException e) {
-            return "Error: Could not read JFR file: " + e.getMessage();
+            return "Error: Could not read JFR file (" + e.getClass().getSimpleName() + ")";
         }
     }
 
@@ -198,7 +198,7 @@ public class JfrAllocationTool implements Tool {
         var result = new JsonObject();
 
         var recording = new JsonObject();
-        recording.put("path", path.toAbsolutePath().toString());
+        recording.put("path", path.toString());
         recording.put("duration_seconds", round1(durationSeconds));
         result.put("recording", recording);
 
