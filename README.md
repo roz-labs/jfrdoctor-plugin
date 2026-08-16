@@ -30,7 +30,7 @@ The tools are a local process (`java -jar`), so they need a machine to run on:
 |-|-|-|
 | Claude Code (CLI) | ✅ | ✅ tested |
 | Claude Desktop — **Code** tab | ✅ | ✅ same runtime as the CLI |
-| Cowork — local session | ✅ | ⚠️ expected to work, not tested |
+| Cowork — local session | ✅ | ✅ tested |
 | Cowork — remote session | ✅ loads | ❌ cannot run |
 | claude.ai in a browser | ✅ loads | ❌ cannot run |
 
