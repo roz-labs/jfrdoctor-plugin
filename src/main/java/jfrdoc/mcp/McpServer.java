@@ -39,7 +39,7 @@ public final class McpServer {
     static final String SERVER_NAME = "jfrdoc";
     // Kept in lockstep with pom.xml and .claude-plugin/plugin.json; the
     // three-way check in ci/check-version-sync.sh parses this exact line.
-    static final String SERVER_VERSION = "0.2.0";
+    static final String SERVER_VERSION = "0.3.0";
 
     /** Kept comfortably under Claude Code's 60s default MCP tool-call timeout. */
     static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(55);
