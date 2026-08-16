@@ -9,6 +9,10 @@ exceptions, I/O wait, and native execution — with framework-aware attribution
 and concrete, evidence-backed recommendations.
 </p>
 
+<p align="center">
+<a href="https://github.com/roz-labs/jfrdoctor-plugin/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/roz-labs/jfrdoctor-plugin?label=release"></a>
+</p>
+
 > 🚧 **Proof of concept.** jfrdoc is a Claude Code plugin: an MCP server
 > exposing nine JFR analysis tools, plus a skill that drives them into a
 > fixed report shape. No API key, no agent framework — the server is built
