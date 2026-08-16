@@ -1,0 +1,7 @@
+# JDK-internal package prefixes. Frames matching these are categorized
+# as "jdk".
+
+java.
+jdk.
+sun.
+com.sun.

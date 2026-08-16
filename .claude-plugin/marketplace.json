@@ -1,0 +1,21 @@
+{
+  "$schema": "https://www.schemastore.org/claude-code-marketplace.json",
+  "name": "roz-labs",
+  "description": "roz-labs' Claude Code plugins.",
+  "owner": {
+    "name": "roz-labs",
+    "url": "https://github.com/roz-labs"
+  },
+  "plugins": [
+    {
+      "name": "jfrdoc",
+      "source": "./",
+      "description": "JVM Flight Recorder analysis: nine JFR tools plus a structured performance-report skill. Requires JDK 21+ on PATH.",
+      "category": "development",
+      "tags": ["jfr", "jvm", "performance", "profiling", "flight-recorder", "spring", "quarkus"],
+      "homepage": "https://github.com/roz-labs/jfrdoctor-plugin",
+      "repository": "https://github.com/roz-labs/jfrdoctor-plugin",
+      "license": "MIT"
+    }
+  ]
+}

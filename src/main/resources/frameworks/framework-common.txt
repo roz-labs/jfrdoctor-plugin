@@ -1,0 +1,19 @@
+# Prefixes always treated as framework code, regardless of which
+# --framework value was passed. One prefix per line; lines starting
+# with '#' and blank lines are ignored.
+
+org.springframework.
+org.apache.
+org.hibernate.
+org.eclipse.
+io.quarkus.
+io.smallrye.
+io.vertx.
+io.netty.
+jakarta.
+javax.
+com.fasterxml.
+com.google.
+reactor.
+kotlin.
+scala.

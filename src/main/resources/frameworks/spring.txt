@@ -1,0 +1,7 @@
+# Extra framework prefixes activated when --framework spring is passed.
+# Anything in framework-common.txt already counts as framework — this
+# file is for Spring-specific dependencies that aren't generic.
+
+org.thymeleaf.
+org.slf4j.
+ch.qos.logback.

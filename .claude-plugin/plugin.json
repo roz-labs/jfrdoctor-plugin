@@ -1,0 +1,20 @@
+{
+  "$schema": "https://www.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "jfrdoc",
+  "version": "0.2.0",
+  "description": "JVM Flight Recorder analysis for Claude Code: nine JFR tools (CPU, GC, allocation, memory, locks, exceptions, I/O, native) plus a skill that turns them into a structured performance report. Requires JDK 21+ on PATH.",
+  "author": {
+    "name": "roz-labs",
+    "url": "https://github.com/roz-labs/jfrdoctor-plugin"
+  },
+  "homepage": "https://github.com/roz-labs/jfrdoctor-plugin",
+  "repository": "https://github.com/roz-labs/jfrdoctor-plugin",
+  "license": "MIT",
+  "keywords": ["jfr", "jvm", "performance", "profiling", "flight-recorder", "spring", "quarkus"],
+  "mcpServers": {
+    "jfrdoc": {
+      "command": "java",
+      "args": ["-jar", "${CLAUDE_PLUGIN_ROOT}/lib/jfrdoc-mcp.jar"]
+    }
+  }
+}

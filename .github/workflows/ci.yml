@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # Step order matters. Everything that asserts something about the COMMITTED
+      # lib/jfrdoc-mcp.jar runs before ./build.sh, because build.sh overwrites that
+      # jar and its checksum — running it first would make the freshness and
+      # checksum checks compare the artifact against itself and pass trivially.
+
+      # README tells users to verify the jar with this file, so it must be right.
+      # check-jar-freshness.sh compares jar *contents*, never the checksum file.
+      - name: Verify committed jar checksum
+        run: sha256sum -c lib/jfrdoc-mcp.jar.sha256
+
+      - name: Generate demo recording
+        run: ./samples/gen-sample.sh
+
+      - name: Verify no recording leaks host data
+        run: ./ci/check-sample-privacy.sh
+
+      # Drives the committed jar — the exact artifact users install.
+      - name: Run smoke tests (protocol + all 9 tools over stdio)
+        run: ./test/smoke.sh
+
+      # Builds from src/ internally and diffs against the committed jar, so this
+      # also catches compile errors.
+      - name: Verify committed jar matches src/
+        run: ./ci/check-jar-freshness.sh
+
+      - name: Verify version sync (pom.xml / plugin.json / McpServer.java)
+        run: ./ci/check-version-sync.sh
+
+      # Last: exercise the release script itself, which nothing above covers.
+      # It clobbers lib/, which is fine now that every assertion above has run.
+      - name: Exercise the release build script
+        run: ./build.sh
+
+  validate-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      # The same manifest validation the marketplace submission pipeline runs.
+      - name: Validate plugin and marketplace manifests
+        run: claude plugin validate . --strict

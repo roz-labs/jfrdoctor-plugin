@@ -1,0 +1,7 @@
+# Extra framework prefixes activated when --framework quarkus is passed.
+# Anything in framework-common.txt already counts as framework — this
+# file is for Quarkus-specific dependencies that aren't generic.
+
+org.jboss.
+io.agroal.
+org.graalvm.

@@ -1,0 +1,22 @@
+# Build outputs (lib/jfrdoc-mcp.jar IS committed so the plugin works on install)
+target/
+build/
+*.class
+dependency-reduced-pom.xml
+
+# JFR recordings are NEVER committed. A recording captures host environment
+# variables (with values) and the full system process table, so it carries
+# credentials and private paths regardless of what was profiled. Generate the
+# demo recording locally with ./samples/gen-sample.sh; ci/check-sample-privacy.sh
+# fails the build if one is ever tracked.
+*.jfr
+
+# JVM crash / replay dumps — easy to produce accidentally in a JFR project
+hs_err_pid*.log
+replay_pid*.log
+
+# OS / IDE
+.DS_Store
+.idea/
+*.iml
+.vscode/
