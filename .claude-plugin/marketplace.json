@@ -10,7 +10,7 @@
     {
       "name": "jfrdoc",
       "source": "./",
-      "description": "JVM Flight Recorder analysis: nine JFR tools plus a structured performance-report skill. Requires JDK 21+ on PATH.",
+      "description": "JVM Flight Recorder analysis: ten JFR tools (incl. baseline-diff for CI regression gates) plus two skills — a structured performance-report skill and a baseline-comparison skill. Requires JDK 21+ on PATH.",
       "category": "development",
       "tags": ["jfr", "jvm", "performance", "profiling", "flight-recorder", "spring", "quarkus"],
       "homepage": "https://github.com/roz-labs/jfrdoctor-plugin",

@@ -1,0 +1,106 @@
+name: 'jfrdoc Regression Gate'
+description: >-
+  Fails the build when a JVM Flight Recorder regression is detected between a
+  baseline recording and a current one — allocation rate, GC pause overhead,
+  GC p99 pause, total memory footprint, and container-fit verdict. Runs the
+  committed jfrdoc-mcp.jar directly (java -jar ... diff); no server, no
+  account, nothing beyond a JDK already on PATH.
+author: 'roz-labs'
+branding:
+  icon: 'activity'
+  color: 'orange'
+
+inputs:
+  baseline:
+    description: 'Path to the baseline .jfr recording'
+    required: true
+  current:
+    description: 'Path to the current .jfr recording to compare against the baseline'
+    required: true
+  container-memory-mb:
+    description: >-
+      Container memory limit in MB, applied to both recordings for
+      container-fit comparison. If omitted, container-fit is not evaluable.
+    required: false
+    default: ''
+  framework:
+    description: "Framework hint for allocation categorization: 'spring', 'quarkus', or 'other'."
+    required: false
+    default: 'other'
+  allocation-threshold-pct:
+    description: 'Regression threshold for allocation rate, as a % increase over baseline (default 20).'
+    required: false
+    default: ''
+  gc-pause-overhead-threshold-pp:
+    description: >-
+      Regression threshold for GC pause overhead, as a percentage-point
+      increase over baseline (default 2).
+    required: false
+    default: ''
+  gc-p99-threshold-pct:
+    description: 'Regression threshold for GC p99 pause time, as a % increase over baseline (default 30).'
+    required: false
+    default: ''
+  memory-threshold-pct:
+    description: 'Regression threshold for total committed memory, as a % increase over baseline (default 15).'
+    required: false
+    default: ''
+
+outputs:
+  verdict:
+    description: "'PASS' or 'FAIL'."
+    value: ${{ steps.diff.outputs.verdict }}
+  report-json:
+    description: 'The full jfr_baseline_diff comparison report, as JSON.'
+    value: ${{ steps.diff.outputs.report-json }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: diff
+      shell: bash
+      env:
+        BASELINE: ${{ inputs.baseline }}
+        CURRENT: ${{ inputs.current }}
+        FRAMEWORK: ${{ inputs.framework }}
+        CONTAINER_MEMORY_MB: ${{ inputs.container-memory-mb }}
+        ALLOC_THRESHOLD: ${{ inputs.allocation-threshold-pct }}
+        GC_OVERHEAD_THRESHOLD: ${{ inputs.gc-pause-overhead-threshold-pp }}
+        GC_P99_THRESHOLD: ${{ inputs.gc-p99-threshold-pct }}
+        MEMORY_THRESHOLD: ${{ inputs.memory-threshold-pct }}
+        JFRDOC_JAR: ${{ github.action_path }}/lib/jfrdoc-mcp.jar
+      run: |
+        set -euo pipefail
+
+        command -v java >/dev/null 2>&1 || {
+          echo "::error::java not found on PATH. This action needs JDK 21+ — set it up first, e.g. with actions/setup-java@v4."
+          exit 2
+        }
+
+        ARGS=(diff --baseline "$BASELINE" --current "$CURRENT" --framework "$FRAMEWORK")
+        [ -n "$CONTAINER_MEMORY_MB" ] && ARGS+=(--container-memory-mb "$CONTAINER_MEMORY_MB")
+        [ -n "$ALLOC_THRESHOLD" ] && ARGS+=(--allocation-threshold-pct "$ALLOC_THRESHOLD")
+        [ -n "$GC_OVERHEAD_THRESHOLD" ] && ARGS+=(--gc-pause-overhead-threshold-pp "$GC_OVERHEAD_THRESHOLD")
+        [ -n "$GC_P99_THRESHOLD" ] && ARGS+=(--gc-p99-threshold-pct "$GC_P99_THRESHOLD")
+        [ -n "$MEMORY_THRESHOLD" ] && ARGS+=(--memory-threshold-pct "$MEMORY_THRESHOLD")
+
+        set +e
+        OUTPUT=$(java -jar "$JFRDOC_JAR" "${ARGS[@]}")
+        STATUS=$?
+        set -e
+
+        echo "$OUTPUT"
+
+        {
+          echo "report-json<<JFRDOC_REPORT_EOF"
+          echo "$OUTPUT"
+          echo "JFRDOC_REPORT_EOF"
+        } >> "$GITHUB_OUTPUT"
+
+        case "$STATUS" in
+          0) echo "verdict=PASS" >> "$GITHUB_OUTPUT" ;;
+          1) echo "verdict=FAIL" >> "$GITHUB_OUTPUT" ;;
+          *) echo "verdict=ERROR" >> "$GITHUB_OUTPUT" ;;
+        esac
+
+        exit "$STATUS"

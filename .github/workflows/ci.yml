@@ -37,8 +37,14 @@ jobs:
         run: ./ci/check-sample-privacy.sh
 
       # Drives the committed jar — the exact artifact users install.
-      - name: Run smoke tests (protocol + all 9 tools over stdio)
+      - name: Run smoke tests (protocol + all 10 tools over stdio)
         run: ./test/smoke.sh
+
+      # jfr_baseline_diff's headless `diff` CLI entry point (what the
+      # composite action drives) never speaks MCP, so it needs its own
+      # exit-code/stdout contract test.
+      - name: Run diff CLI regression-gate smoke test
+        run: ./test/diff-cli-smoke.sh
 
       # Builds from src/ internally and diffs against the committed jar, so this
       # also catches compile errors.
@@ -65,3 +71,38 @@ jobs:
       # The same manifest validation the marketplace submission pipeline runs.
       - name: Validate plugin and marketplace manifests
         run: claude plugin validate . --strict
+
+  test-regression-gate-action:
+    # Exercises action.yml itself the way an external consumer's workflow
+    # would (`uses: roz-labs/jfrdoctor-plugin@vX`), independent of
+    # build-and-test — it drives the committed lib/jfrdoc-mcp.jar directly and
+    # never touches the Maven build.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Generate demo recording
+        run: ./samples/gen-sample.sh
+
+      - name: Self-test the regression-gate action (baseline == current, expect PASS)
+        id: gate
+        uses: ./
+        with:
+          baseline: samples/sample.jfr
+          current: samples/sample.jfr
+          container-memory-mb: '1000'
+
+      - name: Assert the action reports PASS
+        run: |
+          if [ "${{ steps.gate.outputs.verdict }}" != "PASS" ]; then
+            echo "::error::expected verdict=PASS, got '${{ steps.gate.outputs.verdict }}'"
+            exit 1
+          fi
+          echo "OK: regression-gate action reports PASS on a trivial self-compare."

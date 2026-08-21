@@ -51,6 +51,11 @@ public final class JsonObject {
         throw new JsonException("not a number: " + key);
     }
 
+    public double getDouble(String key) {
+        if (get(key) instanceof Number n) return n.doubleValue();
+        throw new JsonException("not a number: " + key);
+    }
+
     /**
      * Adapts an MCP tool-call arguments map (as handed to us by the SDK's JSON
      * binding) into a JsonObject, so the nine Tool implementations keep reading
