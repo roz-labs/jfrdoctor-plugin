@@ -171,14 +171,20 @@ public class JfrSummaryTool implements Tool {
 
     /**
      * HotSpot's version string ends in {@code , built on <date> by "<user>"
-     * with <compiler>}; on a locally built JDK that user is a developer's OS
-     * account. Everything from ", built on" is dropped.
+     * with <compiler>}, and a locally built JDK's version itself carries the
+     * builder too ({@code 21-internal-adhoc.<user>.<dir>}, OpenJDK's default
+     * VERSION_OPT). Everything from ", built on" is dropped and the adhoc
+     * segment reads {@code adhoc.<omitted>}.
      */
     static String trimBuildInfo(String version) {
         if (version == null) return null;
         int cut = version.indexOf(", built on");
-        return cut < 0 ? version : version.substring(0, cut);
+        String trimmed = cut < 0 ? version : version.substring(0, cut);
+        return ADHOC_BUILD.matcher(trimmed).replaceAll("adhoc.<omitted>");
     }
+
+    private static final java.util.regex.Pattern ADHOC_BUILD =
+            java.util.regex.Pattern.compile("adhoc\\.[^)\\s,]*");
 
     static void putIfPresent(JsonObject target, jdk.jfr.consumer.RecordedEvent e, String field, String jsonKey) {
         if (e.hasField(field)) {

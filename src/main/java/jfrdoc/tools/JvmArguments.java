@@ -165,42 +165,49 @@ final class JvmArguments {
         return false;
     }
 
-    /**
-     * True when the first token isn't a jar but a later one is a path ending in
-     * .jar: a jar path containing a space ({@code John Smith/app.jar}), split
-     * by JFR's space-joining. Then neither the "main" nor the count is real.
-     */
-    private static boolean splitJarPath(List<String> tokens) {
-        if (tokens.isEmpty() || endsWithAny(tokens.get(0), ".jar")) return false;
-        for (int i = 1; i < tokens.size(); i++) {
-            String t = tokens.get(i);
-            if ((t.contains("/") || t.contains("\\")) && endsWithAny(before(t, '='), ".jar")) return true;
-        }
-        return false;
-    }
+    /** Archives {@code java -jar} can run. */
+    private static final String[] ARCHIVES = {".jar", ".war", ".ear"};
 
     /**
-     * The main class or jar that javaArguments starts with: a jar reduced to
-     * its file name, or a class name. Null for anything else — notably a jar
-     * path containing a space, whose first token is only a fragment (such as
-     * {@code /home/jane}) and must not be passed on.
+     * The main class or archive that javaArguments starts with: an archive
+     * reduced to its file name, or a class name. Null when it can't be told
+     * apart from a fragment of a path that contained a space.
+     *
+     * <p>JFR joins arguments with spaces, so {@code java -jar "John Smith/app.war"}
+     * is recorded as {@code John Smith/app.war} and {@code "jane doe.jar"} as
+     * {@code jane doe.jar} — their first tokens look like class names. So when
+     * an archive appears later in the arguments, the first token counts as a
+     * main class only if it is shaped like a real one: package-qualified,
+     * with a capitalized simple name ({@code org.apache.hadoop.util.RunJar
+     * /jobs/x.jar}).
      */
     static String mainClassOrJar(String javaArguments) {
         List<String> tokens = tokens(javaArguments);
-        if (tokens.isEmpty() || splitJarPath(tokens)) return null;
+        if (tokens.isEmpty()) return null;
         String first = tokens.get(0);
-        if (first.toLowerCase(Locale.ROOT).endsWith(".jar")) {
-            String jar = fileName(first);
-            return FILE_NAME.matcher(jar).matches() ? jar : null;
+        if (endsWithAny(first, ARCHIVES)) {
+            String archive = fileName(first);
+            return FILE_NAME.matcher(archive).matches() ? archive : null;
         }
-        return CLASS_NAME.matcher(first).matches() ? first : null;
+        if (!CLASS_NAME.matcher(first).matches()) return null;
+        boolean archiveLater = false;
+        for (int i = 1; i < tokens.size(); i++) {
+            if (endsWithAny(before(tokens.get(i), '='), ARCHIVES)) archiveLater = true;
+        }
+        if (archiveLater && !qualifiedClassName(first)) return null;
+        return first;
     }
 
-    /** How many program arguments follow the main class or jar; null when that can't be told. */
+    /** "com.example.Main": has a package and a capitalized simple name. */
+    private static boolean qualifiedClassName(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot > 0 && dot + 1 < name.length() && Character.isUpperCase(name.charAt(dot + 1));
+    }
+
+    /** How many program arguments follow the main class or archive; null when that isn't known. */
     static Integer programArgumentCount(String javaArguments) {
-        List<String> tokens = tokens(javaArguments);
-        if (splitJarPath(tokens)) return null;
-        return Math.max(0, tokens.size() - 1);
+        if (mainClassOrJar(javaArguments) == null) return null;
+        return tokens(javaArguments).size() - 1;
     }
 
     private static List<String> tokens(String s) {

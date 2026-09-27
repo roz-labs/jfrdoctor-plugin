@@ -164,10 +164,21 @@ public final class McpServer {
         CharsetDecoder utf8 = StandardCharsets.UTF_8.newDecoder()
                 .onMalformedInput(CodingErrorAction.REPORT)
                 .onUnmappableCharacter(CodingErrorAction.REPORT);
+        boolean midLine = false;
         while (true) {
             try {
+                if (midLine) {
+                    // A failure (e.g. OutOfMemoryError) interrupted the last
+                    // read partway through a line: skip the rest of it, so its
+                    // tail is never taken for a message of its own.
+                    midLine = false;
+                    if (skipLine(in) == EOF) break;
+                    continue;
+                }
                 line.reset();
+                midLine = true;
                 int status = readLine(in, line);
+                midLine = false;
                 if (status == EOF) break;
                 if (status == TOO_LONG) {
                     sendError(JsonObject.NULL, INVALID_REQUEST, "Request exceeds " + MAX_LINE_BYTES + " bytes");
@@ -197,6 +208,15 @@ public final class McpServer {
     static final int OK = 0;
     static final int EOF = 1;
     static final int TOO_LONG = 2;
+
+    /** Consumes input up to and including the next newline. */
+    static int skipLine(InputStream in) throws IOException {
+        int b;
+        while ((b = in.read()) != -1) {
+            if (b == '\n') return OK;
+        }
+        return EOF;
+    }
 
     /**
      * Reads one line of raw bytes into {@code buf}, stopping at

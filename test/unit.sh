@@ -12,3 +12,4 @@ find src/main/java test/java -name '*.java' -print0 \
 
 java -cp "$CLASSES" jfrdoc.json.JsonParserTest
 java -cp "$CLASSES" jfrdoc.tools.JvmArgumentsTest
+java -cp "$CLASSES" jfrdoc.mcp.McpServerTest

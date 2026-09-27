@@ -134,7 +134,8 @@ check("jvmArguments" not in jvm and "javaArguments" not in jvm,
 
 summary_text = json.dumps(payloads.get("jfr_summary", {}))
 sample_abs = os.path.abspath(sys.argv[3])
-check(sample_abs not in summary_text and os.path.expanduser("~") not in summary_text,
+home = os.path.expanduser("~")
+check(sample_abs not in summary_text and (len(home) <= 1 or home not in summary_text),
       "jfr_summary carries no absolute path or home directory from the recording's command line")
 check(all("/" not in f and "\\" not in f for f in jvm.get("jvmFlags", [])),
       "no jvmFlags entry contains a path")

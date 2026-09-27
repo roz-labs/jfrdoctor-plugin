@@ -95,6 +95,34 @@ public final class JvmArgumentsTest {
         check(JvmArguments.programArgumentCount("John Smith/app.jar") == null,
                 "argument count is withheld when the jar path was split");
 
+        // Second review round: other archive types, spaces in the file name,
+        // and real command lines that take an archive as an argument.
+        check(JvmArguments.mainClassOrJar("John Smith/jenkins.war") == null, "split .war path surfaces no fragment");
+        check(JvmArguments.mainClassOrJar("jane doe.jar") == null, "space in the jar's file name surfaces no fragment");
+        check(JvmArguments.mainClassOrJar("john.smith jr/app.jar") == null, "dotted lowercase fragment isn't taken for a class");
+        check(JvmArguments.mainClassOrJar("/opt/app/my app.jar x") == null
+                && JvmArguments.programArgumentCount("/opt/app/my app.jar x") == null,
+                "absolute split path: neither main nor count");
+        check("jenkins.war".equals(JvmArguments.mainClassOrJar("/opt/jenkins/jenkins.war --httpPort=8080")),
+                "a .war is reported like a jar");
+        String spark = "org.apache.spark.deploy.SparkSubmit --class com.x.Main /opt/jobs/etl.jar";
+        check("org.apache.spark.deploy.SparkSubmit".equals(JvmArguments.mainClassOrJar(spark))
+                && Integer.valueOf(3).equals(JvmArguments.programArgumentCount(spark)),
+                "Spark submit keeps its main class and count");
+        check("org.apache.hadoop.util.RunJar".equals(JvmArguments.mainClassOrJar("org.apache.hadoop.util.RunJar /home/alice/job.jar in out")),
+                "Hadoop RunJar keeps its main class");
+        check("JfrLoad".equals(JvmArguments.mainClassOrJar("JfrLoad")), "default-package main class kept");
+
+        String adhoc = "OpenJDK 64-Bit Server VM (21-internal-adhoc.alice.jdk) for linux-amd64 JRE (21-internal-adhoc.alice.jdk),"
+                + " built on 2026-01-22T23:46:23Z by \"alice\" with gcc 13.3.0";
+        String trimmed = JfrSummaryTool.trimBuildInfo(adhoc);
+        check(!trimmed.contains("alice") && trimmed.contains("21-internal-adhoc.<omitted>"),
+                "locally built JDK: builder's username removed from jvmVersion (got " + trimmed + ")");
+        String distro = "OpenJDK 64-Bit Server VM (21.0.10+7-Ubuntu-124.04) for linux-amd64 JRE (21.0.10+7-Ubuntu-124.04),"
+                + " built on 2026-01-22T23:46:23Z by \"buildd\" with gcc 13.3.0";
+        check("OpenJDK 64-Bit Server VM (21.0.10+7-Ubuntu-124.04) for linux-amd64 JRE (21.0.10+7-Ubuntu-124.04)"
+                .equals(JfrSummaryTool.trimBuildInfo(distro)), "distro JDK version kept, build info cut");
+
         if (!failures.isEmpty()) {
             System.err.println(failures.size() + " JvmArguments test(s) failed:");
             failures.forEach(f -> System.err.println("  " + f));

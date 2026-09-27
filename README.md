@@ -108,7 +108,7 @@ typically 1–10 KB.
 Prerequisite: **JDK 21+** on `PATH`. There is no build step and no build tool.
 
 ```bash
-./test/unit.sh                 # JSON parser + JVM-argument sanitizer unit tests
+./test/unit.sh                 # unit tests: JSON parser, JVM-argument sanitizer, read loop
 ./samples/gen-sample.sh        # generate the 30-second demo recording
 ./ci/check-sample-privacy.sh   # assert no recording leaks host data
 ./test/smoke.sh                # protocol, malformed input, all 9 tools over stdio

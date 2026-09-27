@@ -19,6 +19,8 @@ cd "$REPO_ROOT"
 
 # `git ls-files -s` gives each entry's mode, so symlinks (120000) and
 # submodules (160000) are reported instead of followed.
+# The Python program below is wrapped in bash single quotes: it must not
+# contain an apostrophe anywhere, comments included.
 git ls-files -s -z | python3 -c '
 import os, sys
 
@@ -27,7 +29,10 @@ MEDIA_LIMIT = 5 * 1024 * 1024 # images/fonts (the directory caps any file at 5 M
 MAX_FILES = 512
 
 # Images and fonts are identified by content, not by name, so a jar renamed
-# to logo.png is still caught.
+# to logo.png is still caught — and by structure, not only their first bytes:
+# a PNG/JPEG/GIF must end where the format ends and the RIFF size of a WebP must
+# match, so nothing can ride along after a valid header. Any media file that
+# contains a zip directory or a class-file header is rejected outright.
 MAGIC = {
     ".png": [b"\x89PNG\r\n\x1a\n"],
     ".jpg": [b"\xff\xd8\xff"], ".jpeg": [b"\xff\xd8\xff"],
@@ -56,8 +61,16 @@ for entry in entries:
     ext = os.path.splitext(path)[1].lower()
     if ext in MAGIC:
         ok = any(data.startswith(m) for m in MAGIC[ext])
-        if ext == ".webp":
-            ok = ok and data[8:12] == b"WEBP"
+        if ext == ".png":
+            ok = ok and data.endswith(b"IEND\xaeB`\x82")
+        elif ext in (".jpg", ".jpeg"):
+            ok = ok and data.rstrip(b"\x00").endswith(b"\xff\xd9")
+        elif ext == ".gif":
+            ok = ok and data.endswith(b";")
+        elif ext == ".webp":
+            ok = ok and data[8:12] == b"WEBP" and int.from_bytes(data[4:8], "little") + 8 == len(data)
+        if ok and (b"PK\x03\x04" in data or b"PK\x05\x06" in data or b"\xca\xfe\xba\xbe" in data):
+            ok = False
         if not ok:
             problems.append(f"{path}: named like an image/font but its content is not one")
         elif len(data) > MEDIA_LIMIT:
