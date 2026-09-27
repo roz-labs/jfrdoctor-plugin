@@ -63,7 +63,9 @@ See [SECURITY.md](SECURITY.md) for exactly what reaches the model.
 ## Install
 
 Prerequisite: **JDK 21+** on `PATH` — a full JDK, not just a JRE, because the
-server is compiled from source at startup. Nothing else to install.
+server is compiled from source at startup. Nothing else to install. (If the
+server fails to start with `Module jdk.compiler not in boot Layer`, the `java`
+on `PATH` is a JRE.)
 
 ```
 /plugin marketplace add roz-labs/jfrdoctor-plugin
