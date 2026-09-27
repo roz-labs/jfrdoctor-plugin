@@ -9,13 +9,17 @@ It makes no outbound network connections and has no telemetry.
 - **True by construction.** `src/main/java` has no imports of `java.net.*`,
   `javax.net.*`, or `java.rmi.*` — the only file I/O is reading the `.jfr`
   you name via `jdk.jfr.consumer.RecordingFile`. Verify yourself:
-  `grep -rn "java\.net\." src/main/java`.
+  `grep -rn "java\.net\." src/main/java launcher` — the one hit is the
+  launcher's `java.net.URL`/`URI`, used as local file handles for its
+  in-memory compiler and resource lookup, not for networking.
 - **Nothing compiled, nothing downloaded.** The plugin ships only readable
   source and depends on nothing outside the JDK. `launcher/Launch.java`
   compiles `src/main/java` in memory with the JDK's own compiler each time
   the server starts, and resolves classes and resources from the plugin's
-  own tree — never the classpath or your working directory. There is no
-  package install, no download, and no file written to disk.
+  own tree — never the classpath or your working directory (the manifest
+  pins `-cp` to the launcher folder for the same reason). There is no
+  package install, no download, and no file written to disk
+  (`-XX:-UsePerfData` also stops the JVM's `hsperfdata` temp file).
 
 ## What data flows to your model, and why
 
@@ -49,12 +53,16 @@ can incidentally carry, unrelated to code structure — is minimized:
 - **JVM/program arguments** (`jfr_summary`'s `jvm` block): never sent
   verbatim. A command line can carry a secret in any shape, so instead of
   guessing which values are secret, jfrdoc keeps only what it can prove is
-  safe by shape: `-XX:+Flag` switches, numeric values (`-Xmx512m`,
-  `MaxRAMPercentage=75.0`), `-D` property *names* without values, agent jar
-  file names without options, and the names of standard launcher options.
-  Every other value reads `<omitted>`; paths, classpath entries and
-  unrecognized tokens are dropped. Of the program arguments, only the main
-  class or jar file name and a count are reported. See
+  safe by shape: `-XX:+Flag` switches, heap sizes (`-Xmx512m`), numeric
+  values of known sizing/GC flags (`MaxRAMPercentage=75.0`), `-D` property
+  *names* (never values) under well-known JDK/framework namespaces, agent
+  file names ending in `.jar`/`.so`/`.dll`/`.dylib` without their options,
+  and the names of standard launcher options. Every other value reads
+  `<omitted>` — other `-D` properties read `-D<omitted>`; paths, classpath
+  entries and unrecognized tokens are dropped. Of the program arguments,
+  only the main class or jar file name and a count are reported, and
+  neither when a jar path was split by a space. The JVM version string is
+  cut before its `built on … by "<user>"` part. See
   `src/main/java/jfrdoc/tools/JvmArguments.java`.
 - **Error responses**: every tool-call error returns only the failing
   exception's class name, never its message text, so a malformed or

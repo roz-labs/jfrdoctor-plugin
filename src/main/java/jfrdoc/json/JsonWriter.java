@@ -74,7 +74,10 @@ final class JsonWriter {
                 case '\b' -> sb.append("\\b");
                 case '\f' -> sb.append("\\f");
                 default -> {
-                    if (c < 0x20) {
+                    // Control chars, U+2028/U+2029 (line separators to naive
+                    // splitters), and unpaired surrogates — which UTF-8 can't
+                    // encode, so they'd reach the client as '?' — are escaped.
+                    if (c < 0x20 || c == ' ' || c == ' ' || isUnpairedSurrogate(s, i)) {
                         sb.append(String.format("\\u%04x", (int) c));
                     } else {
                         sb.append(c);
@@ -83,6 +86,17 @@ final class JsonWriter {
             }
         }
         sb.append('"');
+    }
+
+    static boolean isUnpairedSurrogate(String s, int i) {
+        char c = s.charAt(i);
+        if (Character.isHighSurrogate(c)) {
+            return i + 1 >= s.length() || !Character.isLowSurrogate(s.charAt(i + 1));
+        }
+        if (Character.isLowSurrogate(c)) {
+            return i == 0 || !Character.isHighSurrogate(s.charAt(i - 1));
+        }
+        return false;
     }
 
     /** Doubles print without a trailing ".0" so ratios read as clean integers. */

@@ -1,13 +1,17 @@
 package jfrdoc.mcp;
 
-import java.io.BufferedReader;
+import java.io.BufferedInputStream;
 import java.io.BufferedWriter;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,11 +49,14 @@ import jfrdoc.tools.Tool;
  * malformed input; the rules that keep this one from repeating that:
  *
  * <ul>
- *   <li>Every line is handled inside a catch-all. A line that fails to parse
- *       gets a JSON-RPC error and the session carries on — one bad line never
- *       ends the session or the process.</li>
- *   <li>Lines are capped at {@link #MAX_LINE_CHARS} while being read, so an
- *       endless line can't exhaust memory; {@link JsonParser} caps nesting.</li>
+ *   <li>Every line — reading, decoding and handling it — runs inside a
+ *       catch-all, including {@link Error}s such as OutOfMemoryError. A line
+ *       that fails gets a JSON-RPC error and the session carries on; only EOF
+ *       or a closed stdin ends it.</li>
+ *   <li>Lines are capped at {@link #MAX_LINE_BYTES} while being read, so an
+ *       endless line can't exhaust memory; {@link JsonParser} caps nesting.
+ *       Invalid UTF-8 is a parse error, never silently rewritten.</li>
+ *   <li>Every tools/call gets exactly one response, unless it was cancelled.</li>
  *   <li>Error messages never echo request content back.</li>
  * </ul>
  *
@@ -68,7 +75,7 @@ public final class McpServer {
     static final List<String> PROTOCOL_VERSIONS = List.of("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05");
 
     /** A legitimate request is well under 1 KB; anything past 1 MiB is refused unread. */
-    static final int MAX_LINE_CHARS = 1 << 20;
+    static final int MAX_LINE_BYTES = 1 << 20;
 
     /**
      * Generous ceiling above the ~1-10 KB a legitimate tool call produces
@@ -152,21 +159,36 @@ public final class McpServer {
 
     /** Reads until EOF, then lets queued tool calls finish so their responses go out. */
     void serve(InputStream stdin) throws InterruptedException {
-        var reader = new BufferedReader(new InputStreamReader(stdin, StandardCharsets.UTF_8));
-        var line = new StringBuilder();
-        try {
-            while (true) {
-                line.setLength(0);
-                int status = readLine(reader, line);
+        var in = new BufferedInputStream(stdin);
+        var line = new ByteArrayOutputStream();
+        CharsetDecoder utf8 = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT);
+        while (true) {
+            try {
+                line.reset();
+                int status = readLine(in, line);
                 if (status == EOF) break;
                 if (status == TOO_LONG) {
-                    sendError(JsonObject.NULL, INVALID_REQUEST, "Request exceeds " + MAX_LINE_CHARS + " characters");
+                    sendError(JsonObject.NULL, INVALID_REQUEST, "Request exceeds " + MAX_LINE_BYTES + " bytes");
                     continue;
                 }
-                handleLine(line.toString());
+                String text;
+                try {
+                    text = utf8.decode(ByteBuffer.wrap(line.toByteArray())).toString();
+                } catch (CharacterCodingException e) {
+                    sendError(JsonObject.NULL, PARSE_ERROR, "Parse error: invalid UTF-8");
+                    continue;
+                }
+                handleLine(text);
+            } catch (IOException e) {
+                System.err.println("stdin closed (" + e.getClass().getSimpleName() + ")");
+                break;
+            } catch (Throwable t) {
+                // e.g. OutOfMemoryError while a large analysis holds the heap:
+                // drop this line, keep serving.
+                reportInternalError(JsonObject.NULL, t);
             }
-        } catch (IOException e) {
-            System.err.println("stdin closed (" + e.getClass().getSimpleName() + ")");
         }
         worker.shutdown();
         worker.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
@@ -177,27 +199,31 @@ public final class McpServer {
     static final int TOO_LONG = 2;
 
     /**
-     * Reads one line into {@code sb}, stopping at {@link #MAX_LINE_CHARS}: the
-     * rest of an over-long line is consumed and dropped, never buffered.
-     * A final line without a trailing newline still counts.
+     * Reads one line of raw bytes into {@code buf}, stopping at
+     * {@link #MAX_LINE_BYTES}: the rest of an over-long line is consumed and
+     * dropped, never buffered. A final line without a trailing newline still
+     * counts. A trailing CR is stripped.
      */
-    static int readLine(BufferedReader reader, StringBuilder sb) throws IOException {
+    static int readLine(InputStream in, ByteArrayOutputStream buf) throws IOException {
         boolean tooLong = false;
         boolean any = false;
-        int c;
-        while ((c = reader.read()) != -1) {
+        int b;
+        while ((b = in.read()) != -1) {
             any = true;
-            if (c == '\n') break;
-            if (sb.length() < MAX_LINE_CHARS) {
-                sb.append((char) c);
+            if (b == '\n') break;
+            if (buf.size() < MAX_LINE_BYTES) {
+                buf.write(b);
             } else {
                 tooLong = true;
             }
         }
         if (!any) return EOF;
         if (tooLong) return TOO_LONG;
-        int last = sb.length() - 1;
-        if (last >= 0 && sb.charAt(last) == '\r') sb.setLength(last);
+        byte[] bytes = buf.toByteArray();
+        if (bytes.length > 0 && bytes[bytes.length - 1] == '\r') {
+            buf.reset();
+            buf.write(bytes, 0, bytes.length - 1);
+        }
         return OK;
     }
 
@@ -218,6 +244,13 @@ public final class McpServer {
                 return;
             }
 
+            Object method = msg.opt("method");
+            if (method == null && (msg.has("result") || msg.has("error"))) {
+                // A response (or a peer's error reply, possibly with id null).
+                // This server sends no requests, and responses are never answered.
+                return;
+            }
+
             Object rawId = msg.opt("id");
             // MCP: request ids are strings or integers, never null.
             if (rawId != null && !(rawId instanceof String) && !(rawId instanceof Long)) {
@@ -225,16 +258,12 @@ public final class McpServer {
                 return;
             }
             if (rawId != null) id = rawId;
-
-            Object method = msg.opt("method");
-            if (method == null && rawId != null && (msg.has("result") || msg.has("error"))) {
-                return; // a response to a server→client request; this server never sends any
-            }
             if (!"2.0".equals(msg.opt("jsonrpc")) || !(method instanceof String m)) {
                 sendError(id, INVALID_REQUEST, "Invalid Request");
                 return;
             }
             Object rawParams = msg.opt("params");
+            if (rawParams == JsonObject.NULL) rawParams = null;
             if (rawParams != null && !(rawParams instanceof JsonObject)) {
                 if (rawId != null) sendError(id, INVALID_PARAMS, "params must be an object");
                 return;
@@ -248,8 +277,17 @@ public final class McpServer {
             }
         } catch (Throwable t) {
             // Last line of defence: no input may take the server down.
+            reportInternalError(id, t);
+        }
+    }
+
+    /** Best effort, and never throws: the heap may be exhausted when this runs. */
+    void reportInternalError(Object id, Throwable t) {
+        try {
             System.err.println("internal error handling a message (" + t.getClass().getSimpleName() + ")");
             sendError(id, INTERNAL_ERROR, "Internal error");
+        } catch (Throwable ignored) {
+            // Nothing more can be done for this message; the loop goes on.
         }
     }
 
@@ -260,7 +298,11 @@ public final class McpServer {
             if (call != null) {
                 call.cancelled = true;
                 var f = call.future;
-                if (f != null) f.cancel(true);
+                // A task cancelled before it starts never runs its finally
+                // block, so its id must be released here or it stays "in
+                // progress" forever. (Removing a running one is harmless too:
+                // its own finally only removes its own Call.)
+                if (f != null && f.cancel(true)) inFlight.remove(requestId, call);
             }
         }
         // notifications/initialized and anything else: nothing to do.
@@ -311,6 +353,11 @@ public final class McpServer {
                 if (call.cancelled) return;
                 var result = callTool(tools.get(name), schemas.get(name), args);
                 if (!call.cancelled) sendResult(id, result);
+            } catch (Throwable t) {
+                // callTool already catches tool failures; this covers building
+                // or sending the response (e.g. OutOfMemoryError), so the
+                // request still gets exactly one answer.
+                if (!call.cancelled) reportInternalError(id, t);
             } finally {
                 inFlight.remove(id, call);
             }

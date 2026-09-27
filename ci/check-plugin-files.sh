@@ -17,38 +17,66 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-git ls-files -z | python3 -c '
+# `git ls-files -s` gives each entry's mode, so symlinks (120000) and
+# submodules (160000) are reported instead of followed.
+git ls-files -s -z | python3 -c '
 import os, sys
 
-MEDIA = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".woff", ".woff2", ".ttf", ".otf")
-LIMIT = 256 * 1024
+LIMIT = 256 * 1024            # non-image files
+MEDIA_LIMIT = 5 * 1024 * 1024 # images/fonts (the directory caps any file at 5 MiB)
 MAX_FILES = 512
 
-files = [f for f in sys.stdin.buffer.read().decode().split("\0") if f]
-problems = []
-if len(files) > MAX_FILES:
-    problems.append(f"{len(files)} files tracked; the directory holds plugins over {MAX_FILES}")
+# Images and fonts are identified by content, not by name, so a jar renamed
+# to logo.png is still caught.
+MAGIC = {
+    ".png": [b"\x89PNG\r\n\x1a\n"],
+    ".jpg": [b"\xff\xd8\xff"], ".jpeg": [b"\xff\xd8\xff"],
+    ".gif": [b"GIF87a", b"GIF89a"],
+    ".webp": [b"RIFF"],
+    ".woff": [b"wOFF"], ".woff2": [b"wOF2"],
+    ".ttf": [b"\x00\x01\x00\x00", b"true"], ".otf": [b"OTTO"],
+}
 
-for f in files:
-    if f.lower().endswith(MEDIA):
+entries = [e for e in sys.stdin.buffer.read().decode().split("\0") if e]
+problems = []
+if len(entries) > MAX_FILES:
+    problems.append(f"{len(entries)} files tracked; the directory holds plugins over {MAX_FILES}")
+
+for entry in entries:
+    meta, path = entry.split("\t", 1)
+    mode = meta.split()[0]
+    if mode == "120000":
+        problems.append(f"{path}: symbolic link (commit the file itself)")
         continue
-    size = os.path.getsize(f)
-    if size > LIMIT:
-        problems.append(f"{f}: {size} bytes, over the {LIMIT}-byte limit for non-image files")
-    with open(f, "rb") as fh:
+    if mode == "160000":
+        problems.append(f"{path}: git submodule (commit regular files)")
+        continue
+    with open(path, "rb") as fh:
         data = fh.read()
+    ext = os.path.splitext(path)[1].lower()
+    if ext in MAGIC:
+        ok = any(data.startswith(m) for m in MAGIC[ext])
+        if ext == ".webp":
+            ok = ok and data[8:12] == b"WEBP"
+        if not ok:
+            problems.append(f"{path}: named like an image/font but its content is not one")
+        elif len(data) > MEDIA_LIMIT:
+            problems.append(f"{path}: {len(data)} bytes, over the {MEDIA_LIMIT}-byte per-file limit")
+        continue
+    if len(data) > LIMIT:
+        problems.append(f"{path}: {len(data)} bytes, over the {LIMIT}-byte limit for non-image files")
     if b"\0" in data:
-        problems.append(f"{f}: binary content (NUL bytes) in a non-image file")
+        problems.append(f"{path}: binary content (NUL bytes) in a non-image file")
         continue
     try:
         data.decode("utf-8")
     except UnicodeDecodeError:
-        problems.append(f"{f}: not valid UTF-8 text")
+        problems.append(f"{path}: not valid UTF-8 text")
 
 if problems:
     print("ERROR: plugin files the directory scan would hold for a reviewer:")
     for p in problems:
         print("  " + p)
     sys.exit(1)
-print(f"OK: {len(files)} tracked files, all readable text (or images) under {LIMIT // 1024} KiB.")
+print(f"OK: {len(entries)} tracked files, all readable text (or real images) within the size limits.")
 '

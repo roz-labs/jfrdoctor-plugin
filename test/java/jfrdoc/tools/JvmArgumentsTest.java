@@ -34,7 +34,12 @@ public final class JvmArgumentsTest {
                 "-Xlog:gc*:file=/tmp/gc.log",
                 "-verbose:gc",
                 "--token=ghp_abcdef",
-                "-Dcmd=mysql", "-u", "root", "-pS3cretPass", "--password", "-Xsecretish");
+                "-Dcmd=mysql", "-u", "root", "-pS3cretPass", "--password", "-Xsecretish",
+                // Review findings: split paths and split -D values.
+                "-javaagent:/home/jane doe/agents/newrelic.jar=license=abc",
+                "-agentpath:C:\\Users\\John Smith\\yjp\\libyjpagent.dll",
+                "-Dapp.notes=call", "-D10.0.4.17", "-Ddb01.corp.example.com",
+                "-XX:BankPin=4821", "-XX:Acct=12345678901234");
 
         var flags = JvmArguments.jvmFlags(jvmArgs).toString();
         expect(flags, List.of(
@@ -46,8 +51,8 @@ public final class JvmArgumentsTest {
                 "-XX:OnOutOfMemoryError=<omitted>",
                 "-XX:StartFlightRecording=<omitted>",
                 "-Dspring.datasource.password",
-                "-Ddb.url",
-                "-Dplain",
+                "-D<omitted>",
+                "-D<omitted>",
                 "-javaagent:opentelemetry-javaagent.jar",
                 "-agentpath:libyjpagent.so",
                 "-agentlib:jdwp",
@@ -55,11 +60,16 @@ public final class JvmArgumentsTest {
                 "--add-opens",
                 "-Xlog:<omitted>",
                 "-verbose:<omitted>",
-                "-Dcmd"));
+                "-D<omitted>",
+                "-javaagent:<omitted>",
+                "-agentpath:<omitted>",
+                "-D<omitted>", "-D<omitted>", "-D<omitted>",
+                "-XX:BankPin=<omitted>", "-XX:Acct=<omitted>"));
 
         for (String secret : List.of("hunter2", "s3cret", "sk-live", "ghp_", "alice", "bob", "carol", "dave",
                 "erin", "evil.example", "db.internal", "5005", "10001", "/opt", "/lib", "/tmp", "ALL-UNNAMED", "S3cret", "root",
-                "ghp", "secretish", "--password")) {
+                "ghp", "secretish", "--password", "jane", "John", "Smith", "10.0.4", "corp.example",
+                "4821", "12345678901234", "app.notes", "db.url", "plain", "cmd")) {
             check(!flags.contains(secret), "jvmFlags leaks nothing containing '" + secret + "'");
         }
 
@@ -68,7 +78,8 @@ public final class JvmArgumentsTest {
 
         String javaArgs = "/home/alice/apps/petclinic.jar --spring.datasource.password=hunter2 extra";
         check("petclinic.jar".equals(JvmArguments.mainClassOrJar(javaArgs)), "main jar reduced to its file name");
-        check(JvmArguments.programArgumentCount(javaArgs) == 2, "program arguments are counted, not shown");
+        check(Integer.valueOf(2).equals(JvmArguments.programArgumentCount(javaArgs)),
+                "program arguments are counted, not shown");
         check("com.example.Main".equals(JvmArguments.mainClassOrJar("com.example.Main --password x")),
                 "main class kept as-is");
         check(JvmArguments.mainClassOrJar("") == null, "empty javaArguments -> no main");
@@ -79,6 +90,10 @@ public final class JvmArgumentsTest {
                 "a split home-directory path doesn't surface the username");
         check("run.JAR".equals(JvmArguments.mainClassOrJar("C:\\apps\\run.JAR x")),
                 "Windows jar path reduced to its file name");
+        check(JvmArguments.mainClassOrJar("John Smith/app.jar") == null,
+                "relative jar path split by a space doesn't surface a name fragment");
+        check(JvmArguments.programArgumentCount("John Smith/app.jar") == null,
+                "argument count is withheld when the jar path was split");
 
         if (!failures.isEmpty()) {
             System.err.println(failures.size() + " JvmArguments test(s) failed:");

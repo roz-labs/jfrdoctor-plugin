@@ -113,7 +113,7 @@ public class JfrTopMethodsTool implements Tool {
         Instant latest = null;
 
         try (var rf = new RecordingFile(path)) {
-            while (rf.hasMoreEvents()) {
+            while (Tool.hasMoreEvents(rf)) {
                 var e = rf.readEvent();
 
                 // Recording span must come from every event, not just

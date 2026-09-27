@@ -1,7 +1,10 @@
 package jfrdoc.tools;
 
+import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 
+import jdk.jfr.consumer.RecordingFile;
 import jfrdoc.json.JsonArray;
 import jfrdoc.json.JsonObject;
 
@@ -20,6 +23,17 @@ public interface Tool {
 
     /** Runs the tool; returns pretty-printed JSON, or a string starting with "Error:". */
     String execute(JsonObject input);
+
+    /**
+     * {@link RecordingFile#hasMoreEvents()} that honours cancellation: every
+     * tool's event loop goes through this, so a client's
+     * notifications/cancelled (which interrupts the worker thread) stops a
+     * long parse at the next event instead of letting it run to the end.
+     */
+    static boolean hasMoreEvents(RecordingFile rf) throws IOException {
+        if (Thread.currentThread().isInterrupted()) throw new CancellationException();
+        return rf.hasMoreEvents();
+    }
 
     /**
      * Declarative input-schema builder. Field names come from an enum so tool

@@ -66,6 +66,18 @@ public final class JsonParserTest {
         invalid("{\"a\":".repeat(100_000), "100k nested objects (stack exhaustion attempt)");
         invalid("\u0000", "NUL byte");
 
+        // Writer: an unpaired surrogate can't be encoded as UTF-8 (it would
+        // reach the client as '?', breaking an echoed id), so it's escaped;
+        // a proper pair stays raw; line separators are escaped.
+        check(new JsonArray().put("a\uD800").toString().equals("[\"a\\ud800\"]"), "writer escapes a lone high surrogate");
+        check(new JsonArray().put("\uDC00b").toString().equals("[\"\\udc00b\"]"), "writer escapes a lone low surrogate");
+        check(new JsonArray().put("\uD800\uD800\uDC00").toString().equals("[\"\\ud800\uD800\uDC00\"]"),
+                "writer escapes only the unpaired half next to a valid pair");
+        check(new JsonArray().put("\uD83D\uDE00").toString().equals("[\"\uD83D\uDE00\"]"), "writer keeps a valid pair raw");
+        check(new JsonArray().put("x\u2028y\u2029").toString().equals("[\"x\\u2028y\\u2029\"]"), "writer escapes U+2028/U+2029");
+        Object roundTrip = JsonParser.parse(new JsonArray().put("a\uD800\u2028").toString());
+        check(roundTrip instanceof JsonArray a && "a\uD800\u2028".equals(a.get(0)), "escaped output parses back to the same string");
+
         // Huge numbers must parse in linear time, not hang.
         long start = System.nanoTime();
         JsonParser.parse("1" + "0".repeat(500_000));

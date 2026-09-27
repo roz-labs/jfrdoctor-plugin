@@ -17,17 +17,17 @@ jobs:
   release:
     runs-on: ubuntu-latest
     # workflow_run fires on every completion regardless of pass/fail, so we
-    # must gate on conclusion explicitly. head_branch is checked redundantly
-    # here (in addition to the top-level `branches:` filter above) because
-    # workflow_run's branch filtering is documented to behave unexpectedly
-    # for pull_request-triggered upstream runs.
+    # must gate on conclusion explicitly. head_branch alone is NOT enough: for
+    # a pull_request-triggered CI run it is the PR's source branch name, and a
+    # fork can call its branch `main`. Only a push to this repository's own
+    # main may release, so the event and the head repository are checked too.
     if: |
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main'
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     permissions:
       contents: write
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       # Check out the EXACT commit CI validated, not whatever main HEAD is
       # by the time this job runs — main may have moved further already.
@@ -35,6 +35,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
 
       # Mirrors ci/check-version-sync.sh, which treats plugin.json as the
       # authoritative version.
@@ -45,8 +46,12 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $VERSION"
 
+      # The token is given only to the two steps that call gh, never to the
+      # repository's own scripts.
       - name: Check for existing release
         id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="v${{ steps.version.outputs.version }}"
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
@@ -71,6 +76,8 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="v${{ steps.version.outputs.version }}"
           NOTES="$(cat <<'EOF'

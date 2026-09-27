@@ -52,9 +52,11 @@ leaves the machine except as the aggregated JSON the model reads.
 **Everything the plugin runs:** one process, `java launcher/Launch.java`,
 started by Claude Code. The launcher compiles the plugin's own
 `src/main/java` in memory with the JDK's compiler (about 1–3 seconds at each
-server start), then serves the nine tools over stdin/stdout. It reads only
-the `.jfr` files you name, opens no network connections, reads no
-environment variables or credentials, downloads nothing, and writes no files.
+server start on a multi-core machine, up to ~4 seconds on a single core),
+then serves the nine tools over stdin/stdout. It reads only the `.jfr` files
+you name, opens no network connections, reads no environment variables or
+credentials, downloads nothing, and writes no files (the manifest passes
+`-XX:-UsePerfData`, which stops the JVM's own `hsperfdata` temp file).
 See [SECURITY.md](SECURITY.md) for exactly what reaches the model.
 
 ## Install
@@ -118,8 +120,13 @@ To try the server against a project without installing the plugin, point
 Claude Code at your clone (replace the path):
 
 ```bash
-claude mcp add jfrdoc -- java /path/to/jfrdoctor-plugin/launcher/Launch.java /path/to/jfrdoctor-plugin
+claude mcp add jfrdoc -- java -XX:-UsePerfData -cp /path/to/jfrdoctor-plugin/launcher \
+  /path/to/jfrdoctor-plugin/launcher/Launch.java /path/to/jfrdoctor-plugin
 ```
+
+(`-cp` pins the launcher's classpath to the plugin: without it, the JDK's
+source launcher resolves against the current directory, where a stray
+`.class` file could shadow a class the launcher uses.)
 
 Source layout: `launcher/Launch.java` (compiles `src/main/java` in memory and
 starts the server), `src/main/java/jfrdoc/mcp` (the stdio JSON-RPC server —
@@ -164,13 +171,14 @@ by git, and any recording on disk must contain zero events of those types.
   9 full passes for a complete analysis). Fine for typical minutes-long
   recordings, not yet for huge ones; there's no size preflight or warning.
 - **Startup compiles the server** — each time Claude Code starts the MCP
-  server, the launcher compiles ~4,000 lines of Java first, which adds about
-  1–3 seconds before the tools are listed. Nothing is cached between starts.
+  server, the launcher compiles ~5,000 lines of Java first, which adds about
+  1–3 seconds (up to ~4 on a single core) before the tools are listed.
+  Nothing is cached between starts.
 - **One tool call at a time** — calls run one after another on a single
   worker thread, which keeps memory to one analysis at a time. Ping and
   cancellation are still answered while a call runs. Cancelling a queued call
-  drops it; cancelling a running one interrupts it, but a parse that doesn't
-  check for interruption runs to completion (its result is discarded).
+  drops it; cancelling a running one stops its parse at the next event, so
+  the next call doesn't wait behind an abandoned analysis.
 - **A tool call throwing `Error` (not `Exception`)** — e.g. `OutOfMemoryError`
   on a huge or high-cardinality recording — is caught defensively in
   `McpServer.executeSafely` and returned as a normal tool error rather than
@@ -182,9 +190,9 @@ by git, and any recording on disk must contain zero events of those types.
 - **Data egress** — tool output includes class names, file paths, socket
   endpoints and sample exception messages from the profiled app; it flows into
   the model context like any other tool result. JVM startup arguments are
-  never passed on verbatim: `jfr_summary` reports switches, numeric sizes and
-  `-D` property *names* only, never their values (details in
-  [SECURITY.md](SECURITY.md)). Don't analyze recordings whose metadata you
+  never passed on verbatim: `jfr_summary` reports switches, heap/GC sizing
+  values and well-known `-D` property *names* only, never property values
+  (details in [SECURITY.md](SECURITY.md)). Don't analyze recordings whose metadata you
   can't share with your model provider.
 - **Recordings contain more than your application** — independently of jfrdoc,
   a `.jfr` captured with JFR's `default` or `profile` settings stores every

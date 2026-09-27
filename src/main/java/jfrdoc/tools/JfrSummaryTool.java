@@ -61,7 +61,7 @@ public class JfrSummaryTool implements Tool {
         JsonObject jvmInfo = null;
 
         try (var rf = new RecordingFile(path)) {
-            while (rf.hasMoreEvents()) {
+            while (Tool.hasMoreEvents(rf)) {
                 var e = rf.readEvent();
                 var typeName = e.getEventType().getName();
                 counts.merge(typeName, 1L, Long::sum);
@@ -149,7 +149,9 @@ public class JfrSummaryTool implements Tool {
     static JsonObject readJvmInfo(jdk.jfr.consumer.RecordedEvent e) {
         var info = new JsonObject();
         putIfPresent(info, e, "jvmName", "jvmName");
-        putIfPresent(info, e, "jvmVersion", "jvmVersion");
+        if (e.hasField("jvmVersion")) {
+            info.put("jvmVersion", trimBuildInfo(e.getString("jvmVersion")));
+        }
         if (e.hasField("jvmArguments")) {
             info.put("jvmFlags", JvmArguments.jvmFlags(e.getString("jvmArguments")));
         }
@@ -165,6 +167,17 @@ public class JfrSummaryTool implements Tool {
             }
         }
         return info;
+    }
+
+    /**
+     * HotSpot's version string ends in {@code , built on <date> by "<user>"
+     * with <compiler>}; on a locally built JDK that user is a developer's OS
+     * account. Everything from ", built on" is dropped.
+     */
+    static String trimBuildInfo(String version) {
+        if (version == null) return null;
+        int cut = version.indexOf(", built on");
+        return cut < 0 ? version : version.substring(0, cut);
     }
 
     static void putIfPresent(JsonObject target, jdk.jfr.consumer.RecordedEvent e, String field, String jsonKey) {

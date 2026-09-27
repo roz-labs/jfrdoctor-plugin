@@ -119,7 +119,7 @@ public class JfrAllocationTool implements Tool {
         Instant latest = null;
 
         try (var rf = new RecordingFile(path)) {
-            while (rf.hasMoreEvents()) {
+            while (Tool.hasMoreEvents(rf)) {
                 RecordedEvent e = rf.readEvent();
                 String type = e.getEventType().getName();
 

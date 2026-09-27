@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Protocol + tool smoke test: starts the server exactly as the plugin
-# manifest does (java launcher/Launch.java <plugin-root>), drives it over
-# stdio like an MCP client, and asserts on the responses. Requires
-# samples/sample.jfr (./samples/gen-sample.sh).
+# manifest does (the mcpServers command and args from plugin.json, with
+# ${CLAUDE_PLUGIN_ROOT} set to this checkout), drives it over stdio like an
+# MCP client, and asserts on the responses. Requires samples/sample.jfr
+# (./samples/gen-sample.sh).
 #
 # The session mixes well-formed requests with malformed lines: each bad line
 # must get its own JSON-RPC error while the session keeps serving, and the
@@ -14,7 +15,18 @@ SAMPLE=samples/sample.jfr
 [ -f "$SAMPLE" ] || { echo "missing $SAMPLE — run ./samples/gen-sample.sh"; exit 1; }
 
 OUT=$(mktemp)
-trap 'rm -f "$OUT"' EXIT
+ERR=$(mktemp)
+trap 'rm -f "$OUT" "$ERR"' EXIT
+
+# The server command, read from the manifest so the test can't drift from it.
+mapfile -d '' -t SERVER < <(python3 - "$PWD" <<'PY'
+import json, sys
+root = sys.argv[1]
+server = json.load(open(".claude-plugin/plugin.json"))["mcpServers"]["jfrdoc"]
+for part in [server["command"], *server["args"]]:
+    sys.stdout.write(part.replace("${CLAUDE_PLUGIN_ROOT}", root) + "\0")
+PY
+)
 
 {
   echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}'
@@ -30,6 +42,8 @@ trap 'rm -f "$OUT"' EXIT
   # Queued behind the nine calls above, then cancelled: must get no response.
   echo "{\"jsonrpc\":\"2.0\",\"id\":110,\"method\":\"tools/call\",\"params\":{\"name\":\"jfr_summary\",\"arguments\":{\"path\":\"$SAMPLE\"}}}"
   echo '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":110}}'
+  # Reusing a cancelled id must work (the cancelled call must not keep it "in progress").
+  echo '{"jsonrpc":"2.0","id":110,"method":"tools/call","params":{"name":"jfr_gc_stats","arguments":{"path":"/etc/passwd"}}}'
 
   echo '{"jsonrpc":"2.0","id":100,"method":"tools/call","params":{"name":"jfr_summary","arguments":{"path":"/etc/passwd"}}}'
   echo '{"jsonrpc":"2.0","id":101,"method":"tools/call","params":{"name":"no_such_tool","arguments":{}}}'
@@ -41,6 +55,8 @@ trap 'rm -f "$OUT"' EXIT
   python3 -c 'print("[" * 200000)'                                                   # deep nesting
   echo '{"jsonrpc":"2.0","id":208,"method":"ping","method":"tools/list"}'            # duplicate key
   printf '\xff\xfe\xfd\n'                                                            # invalid UTF-8
+  printf '{"jsonrpc":"2.0","id":"a\xffb","method":"ping"}\n'                           # invalid UTF-8 in a valid request
+  echo '{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"peer error"}}' # a response: never answered
   echo '[{"jsonrpc":"2.0","id":202,"method":"ping"}]'                               # batch
   echo '{"jsonrpc":"2.0","id":{"a":1},"method":"ping"}'                             # object id
   python3 -c 'print("{\"x\":\"" + "a" * 1_100_000 + "\"}")'                          # over-long line
@@ -52,20 +68,23 @@ trap 'rm -f "$OUT"' EXIT
   echo '{"jsonrpc":"2.0","id":209,"method":"tools/call","params":{"name":"jfr_summary","arguments":{"path":null}}}'
   echo '{"jsonrpc":"2.0","id":210,"method":"tools/call","params":{"name":"jfr_summary","arguments":[1]}}'
   echo '{"jsonrpc":"2.0","id":211,"method":"tools/call","params":{"name":"jfr_top_methods","arguments":{"path":"x.jfr","top_n":99999999999}}}'
+  echo '{"jsonrpc":"2.0","id":212,"method":"ping","params":null}'                   # null params = no params
+  echo '{"jsonrpc":"2.0","id":"s\ud800","method":"ping"}'                           # lone-surrogate id echoed intact
   echo ''                                                                            # blank line: ignored
   echo '{"jsonrpc":"2.0","id":300,"method":"ping"}'
   # EOF here: the server finishes queued tool calls, flushes, and exits.
-} | java launcher/Launch.java . 2>/dev/null > "$OUT"
+} | "${SERVER[@]}" 2>"$ERR" > "$OUT" || { echo "server failed; its stderr:"; cat "$ERR"; exit 1; }
 
-python3 - "$OUT" <<'EOF'
-import json, sys
+python3 - "$OUT" "$PWD" "$SAMPLE" <<'EOF' || { echo; echo "server stderr:"; cat "$ERR"; exit 1; }
+import json, os, sys
 
-responses, anonymous = {}, []
+responses, anonymous, seen_ids = {}, [], []
 for line in open(sys.argv[1]):
     r = json.loads(line)
     if r.get("id") is None:
         anonymous.append(r)
     else:
+        seen_ids.append(r["id"])
         responses[r["id"]] = r
 
 failures = []
@@ -113,15 +132,26 @@ check(isinstance(jvm.get("jvmFlags"), list), "jfr_summary reports sanitized jvmF
 check("jvmArguments" not in jvm and "javaArguments" not in jvm,
       "jfr_summary never emits raw jvmArguments/javaArguments")
 
-check(110 not in responses, "cancelled tools/call gets no response")
+summary_text = json.dumps(payloads.get("jfr_summary", {}))
+sample_abs = os.path.abspath(sys.argv[3])
+check(sample_abs not in summary_text and os.path.expanduser("~") not in summary_text,
+      "jfr_summary carries no absolute path or home directory from the recording's command line")
+check(all("/" not in f and "\\" not in f for f in jvm.get("jvmFlags", [])),
+      "no jvmFlags entry contains a path")
+check("built on" not in jvm.get("jvmVersion", ""), "jvmVersion is trimmed before the build user")
+
+check(seen_ids.count(110) == 1, "cancelled tools/call gets no response; its id can be reused")
+check(responses.get(110, {}).get("result", {}).get("isError") is True, "reused id 110 answered by the new call")
 check(responses[100]["result"]["isError"] is True, "non-.jfr path is rejected as tool error")
 check(responses[101]["error"]["code"] == -32602, "unknown tool -> invalid params")
 check(responses[102]["error"]["code"] == -32601, "unknown method -> method not found")
 
 codes = sorted(r["error"]["code"] for r in anonymous)
-check(codes.count(-32700) == 5, f"5 unparseable lines -> 5 parse errors (got {codes.count(-32700)})")
+check(codes.count(-32700) == 6, f"6 unparseable lines -> 6 parse errors (got {codes.count(-32700)})")
 check(codes.count(-32600) == 3, f"batch, object id, over-long line -> 3 invalid requests (got {codes.count(-32600)})")
-check(len(anonymous) == 8, f"exactly 8 id-less error responses (got {len(anonymous)})")
+check(len(anonymous) == 9, f"exactly 9 id-less error responses; the peer's error reply gets none (got {len(anonymous)})")
+check(responses.get(212, {}).get("result") == {}, "params: null is treated as no params")
+check(responses.get("s\ud800", {}).get("result") == {}, "lone-surrogate string id echoed back unchanged")
 check(responses[207]["error"]["code"] == -32600, "jsonrpc 1.0 -> invalid request, id kept")
 for rid, label in [(203, "wrong argument type"), (204, "missing required argument"),
                    (205, "non-integer top_n"), (206, "value outside enum"),

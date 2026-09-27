@@ -16,6 +16,9 @@
     "jfrdoc": {
       "command": "java",
       "args": [
+        "-XX:-UsePerfData",
+        "-cp",
+        "${CLAUDE_PLUGIN_ROOT}/launcher",
         "${CLAUDE_PLUGIN_ROOT}/launcher/Launch.java",
         "${CLAUDE_PLUGIN_ROOT}"
       ]

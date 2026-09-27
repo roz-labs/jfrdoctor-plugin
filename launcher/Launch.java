@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import javax.tools.DiagnosticCollector;
@@ -38,13 +39,22 @@ import javax.tools.ToolProvider;
  *
  * <p>Classes and resources resolve against the plugin tree only — never the
  * classpath, which defaults to the current directory — so files lying around
- * in the user's project can't shadow jfrdoc's own.
+ * in the user's project can't shadow jfrdoc's own. The manifest also passes
+ * {@code -cp <plugin>/launcher}, because the source launcher resolves this
+ * file's own names (even {@code java.lang} ones such as {@code Thread}, which
+ * a default-package class would shadow) against the classpath.
+ *
+ * <p>This file sticks to Java 11 APIs so that on an older JDK it still runs
+ * far enough to say which version is needed.
  *
  * <p>stdout belongs to the MCP protocol: everything here reports on stderr.
  */
 public class Launch {
 
     public static void main(String[] args) throws Throwable {
+        if (Runtime.version().feature() < 21) {
+            fail("jfrdoc needs JDK 21 or newer; the java on PATH is " + Runtime.version() + ".");
+        }
         if (args.length != 1) {
             fail("usage: java launcher/Launch.java <plugin-root>");
         }
@@ -77,7 +87,7 @@ public class Launch {
         try (Stream<Path> walk = Files.walk(sources)) {
             files = walk.filter(p -> p.toString().endsWith(".java") && Files.isRegularFile(p))
                     .sorted()
-                    .toList();
+                    .collect(Collectors.toList());
         }
         var diagnostics = new DiagnosticCollector<JavaFileObject>();
         StandardJavaFileManager standard = javac.getStandardFileManager(diagnostics, null, StandardCharsets.UTF_8);
@@ -106,7 +116,10 @@ public class Launch {
         };
 
         var errors = new StringWriter();
-        List<String> options = List.of("--release", "21", "-proc:none", "-encoding", "UTF-8", "-nowarn", "-g");
+        // No --release: it needs lib/ct.sym, which some JDK packagings leave
+        // out (Debian/Ubuntu's jre-headless has javac but not ct.sym). The
+        // runtime is 21+ (checked above), and CI compiles with --release 21.
+        List<String> options = List.of("-proc:none", "-encoding", "UTF-8", "-nowarn", "-g");
         boolean ok = javac.getTask(errors, fileManager, diagnostics, options, null,
                 standard.getJavaFileObjectsFromPaths(new ArrayList<>(files))).call();
         if (!ok) {

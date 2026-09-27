@@ -21,9 +21,10 @@ they feed.
 - **Framework** — `spring`, `quarkus`, or `other`. Infer it: `jfr_summary`'s
   `jvm.mainClassOrJar` and `jvm.jvmFlags` usually reveal the app (a Spring Boot
   jar, a Quarkus runner). State the inferred value in the report; only ask if
-  truly ambiguous. `jvmFlags` is sanitized: `-D` properties appear by name only
-  and non-numeric flag values read `<omitted>` — that is by design, not missing
-  data, so never ask the user to supply the omitted values.
+  truly ambiguous. `jvmFlags` is sanitized: well-known `-D` properties appear
+  by name only, other properties and non-tuning flag values read `<omitted>`,
+  and `mainClassOrJar` may be absent — that is by design, not missing data, so
+  never ask the user to supply the omitted values.
 - **Container limits** — memory/CPU limits, if the user provides them. Pass the
   memory limit to `jfr_memory` as `container_memory_mb` (integer MB). If not
   provided, note in the report that container-fit analysis was not possible.
