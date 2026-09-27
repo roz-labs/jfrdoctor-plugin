@@ -65,10 +65,8 @@ what this repo's source built.
 /plugin install jfrdoc@roz-labs
 ```
 
-`owner/repo` shorthand clones over SSH by default; if you don't have an SSH key
-loaded, set `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` first. Adding this marketplace by
-raw URL is not supported — the entry uses a repo-relative source, so the whole
-repository has to be cloned.
+Adding this marketplace by raw URL is not supported — the entry uses a
+repo-relative source, so the whole repository has to be cloned.
 
 Then point it at any `.jfr` file you have:
 

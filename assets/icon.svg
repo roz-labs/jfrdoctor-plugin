@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>jfrdoc</title>
+  <!-- A flame graph (stacked call-frame bars) with a heartbeat trace across it:
+       profiling data read by a "doctor". -->
+  <rect width="512" height="512" rx="112" fill="#1f2430"/>
+  <g>
+    <rect x="72"  y="376" width="368" height="48" rx="10" fill="#e8553d"/>
+    <rect x="72"  y="316" width="232" height="48" rx="10" fill="#f07a3a"/>
+    <rect x="316" y="316" width="124" height="48" rx="10" fill="#f07a3a"/>
+    <rect x="72"  y="256" width="148" height="48" rx="10" fill="#f5a03a"/>
+    <rect x="232" y="256" width="72"  height="48" rx="10" fill="#f5a03a"/>
+    <rect x="316" y="256" width="84"  height="48" rx="10" fill="#f5a03a"/>
+    <rect x="72"  y="196" width="96"  height="48" rx="10" fill="#f7c948"/>
+    <rect x="316" y="196" width="48"  height="48" rx="10" fill="#f7c948"/>
+  </g>
+  <polyline points="56,140 176,140 208,84 248,196 284,112 308,140 456,140"
+            fill="none" stroke="#7fe3c4" stroke-width="22"
+            stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
