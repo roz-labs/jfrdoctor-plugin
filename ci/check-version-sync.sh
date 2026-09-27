@@ -6,8 +6,8 @@
 #   src/.../mcp/McpServer.java           SERVER_VERSION  (what the MCP server
 #                                        reports to clients in initialize)
 #
-# The Java constant was previously unchecked, which meant a release could bump
-# the manifest and silently keep announcing the old version over the wire.
+# Without this check a release could bump the manifest and silently keep
+# announcing the old version over the wire.
 #
 # Uses python3 (not jq): python3 ships everywhere this script needs to run,
 # dev machine or CI, with no extra install step.

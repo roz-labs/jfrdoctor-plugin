@@ -3,9 +3,9 @@ package jfrdoc.json;
 /**
  * Strict RFC 8259 parser for the MCP wire protocol — one JSON-RPC message per
  * line, read from a client over stdin. It is deliberately defensive, because
- * an earlier hand-rolled parser in this project crashed the whole server on
- * malformed input. Every failure is a {@link JsonException}; nothing else may
- * escape {@link #parse}, whatever the input:
+ * a parser failure other than a clean error would take the whole server
+ * down. Every failure is a {@link JsonException}; nothing else may escape
+ * {@link #parse}, whatever the input:
  *
  * <ul>
  *   <li>nesting is capped at {@link #MAX_DEPTH}, so adversarial {@code [[[[…}

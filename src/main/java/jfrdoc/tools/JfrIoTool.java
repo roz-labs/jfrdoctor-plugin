@@ -372,13 +372,21 @@ public class JfrIoTool implements Tool {
             80, 443, 8080, 8443);
 
     static String endpointKey(RecordedEvent e) {
-        String host = tryGetString(e, "host");
-        String address = tryGetString(e, "address");
-        Integer port = tryGetInt(e, "port");
+        return endpointKey(tryGetString(e, "host"), tryGetString(e, "address"), tryGetInt(e, "port"));
+    }
+
+    /**
+     * The endpoint's name: its host, else its address. JFR's host is whatever
+     * the JDK resolved, which is the IP literal itself when reverse DNS has
+     * no answer — so an IPv4 address gets its last octet masked here too,
+     * not only in the separate {@code address} field. Hostnames are kept.
+     */
+    static String endpointKey(String host, String address, Integer port) {
         String left;
         if (host != null && !host.isEmpty()) left = host;
         else if (address != null && !address.isEmpty()) left = address;
         else left = "unknown";
+        left = Redaction.maskIpLastOctet(left);
 
         // A recognized service port is a stable, meaningful identity — keep
         // it in the key. Any other port is far more likely the ephemeral

@@ -22,20 +22,20 @@ server starts, so it needs nothing beyond a JDK — no build step, no download.
 
 ## Where this runs
 
-The tools are a local process (`java`), so they need a machine to run on:
+The tools are a local MCP server (a `java` process), so they need your machine.
+Which surfaces start local MCP servers is set by Claude itself
+([plugin feature support across platforms](https://claude.com/docs/plugins/platform-support)):
 
-| Surface | Skill | The nine tools |
-|-|-|-|
-| Claude Code (CLI) | ✅ | ✅ tested |
-| Claude Desktop — **Code** tab | ✅ | ✅ same runtime as the CLI |
-| Cowork — local session | ✅ | ✅ tested |
-| Cowork — remote session | ✅ loads | ❌ cannot run |
-| claude.ai in a browser | ✅ loads | ❌ cannot run |
+| Surface | Skill | The nine tools | Tested with 0.4.0 |
+|-|-|-|-|
+| Claude Code — terminal, IDE extensions, desktop **Code** tab | ✅ | ✅ | ✅ terminal, end to end |
+| Cowork — session running on your computer | ✅ | ✅ | not yet |
+| Cowork — session running in the cloud | ✅ | ❌ | — |
+| Chat — claude.ai on the web, desktop and mobile | ✅ | ❌ | — |
 
-Wherever Claude runs in the cloud rather than on your machine — a browser session,
-or a remote Cowork session — there is no local JVM and no local `.jfr` file, so the
-skill loads but every tool it calls is missing and no report can be produced. Use
-jfrdoc from Claude Code or the Claude Desktop app.
+Where the tools can't run, there is no local JVM and no local `.jfr` file: the
+skill loads but every tool it calls is missing, and no report can be produced.
+Use jfrdoc from Claude Code, or from a Cowork session on your computer.
 
 ## How it's put together
 
@@ -57,6 +57,7 @@ then serves the nine tools over stdin/stdout. It reads only the `.jfr` files
 you name, opens no network connections, reads no environment variables or
 credentials, downloads nothing, and writes no files (the manifest passes
 `-XX:-UsePerfData`, which stops the JVM's own `hsperfdata` temp file).
+`test/no-egress.sh` checks this at the system-call level with `strace`.
 See [SECURITY.md](SECURITY.md) for exactly what reaches the model.
 
 ## Install
@@ -69,22 +70,24 @@ server is compiled from source at startup. Nothing else to install.
 /plugin install jfrdoc@roz-labs
 ```
 
-Adding this marketplace by raw URL is not supported — the entry uses a
-repo-relative source, so the whole repository has to be cloned.
+Installing through a raw URL to `marketplace.json` doesn't work: the
+marketplace can be added that way, but the plugin entry uses a repo-relative
+source, so installing it needs the whole repository cloned as above.
 
 Then point it at any `.jfr` file you have:
 
 > analyze recording.jfr — it's a plain Java batch app, container memory limit is 1000Mi, no CPU limit
 
 No recording ships with this repo (see [Demo recording](#demo-recording) for why),
-but you can generate one in 30 seconds:
+but you can generate one in about 30 seconds:
 
 ```bash
 ./samples/gen-sample.sh   # writes samples/sample.jfr
 ```
 
 [`samples/example-report.md`](samples/example-report.md) is a real end-to-end run
-of exactly that flow against that generated recording — committed verbatim.
+of exactly that prompt against that generated recording with jfrdoc 0.4.0 —
+the report as Claude wrote it, committed verbatim.
 
 ## Tools
 
@@ -97,7 +100,7 @@ of exactly that flow against that generated recording — committed verbatim.
 | `jfr_memory` | Heap/metaspace/code-cache/threads/NMT, container-fit verdict |
 | `jfr_lock_contention` | Monitor contention + thread parking, benign-park filtering |
 | `jfr_exceptions` | Per-class throw rates, control-flow-smell detection |
-| `jfr_io` | File/socket blocking time above the JFR ~10ms threshold |
+| `jfr_io` | File/socket blocking time above JFR's I/O threshold (10 ms with the `profile` settings, 20 ms with `default`) |
 | `jfr_native_methods` | Native execution with wait-vs-CPU disambiguation |
 
 Every tool takes a `path` (must end in `.jfr`) and returns aggregated JSON,
@@ -108,13 +111,18 @@ typically 1–10 KB.
 Prerequisite: **JDK 21+** on `PATH`. There is no build step and no build tool.
 
 ```bash
-./test/unit.sh                 # unit tests: JSON parser, JVM-argument sanitizer, read loop
+./ci/check-plugin-files.sh     # plugin ships only readable source (no binaries)
+./ci/check-version-sync.sh     # plugin.json / McpServer.java agree
+./test/unit.sh                 # unit tests: JSON parser/writer, JVM-argument sanitizer,
+                               #   I/O endpoint masking, server read loop
 ./samples/gen-sample.sh        # generate the 30-second demo recording
 ./ci/check-sample-privacy.sh   # assert no recording leaks host data
 ./test/smoke.sh                # protocol, malformed input, all 9 tools over stdio
-./ci/check-plugin-files.sh     # plugin ships only readable source (no binaries)
-./ci/check-version-sync.sh     # plugin.json / McpServer.java agree
+./test/redaction.sh            # every SECURITY.md redaction promise, on a real recording
+./test/no-egress.sh            # no network, no file writes (needs strace)
 ```
+
+CI runs all of these on every push and pull request.
 
 To try the server against a project without installing the plugin, point
 Claude Code at your clone (replace the path):
@@ -134,21 +142,15 @@ lifecycle, tool registration, argument validation), `src/main/java/jfrdoc/json`
 (a strict JSON parser for the wire protocol and a writer for tool output),
 `src/main/java/jfrdoc/tools` (the nine analyzers, framework categorizer and
 redaction), `src/main/resources/frameworks` (package-prefix lists for
-CPU/allocation attribution), `test/` (unit and smoke tests).
+CPU/allocation attribution), `test/` (tests, and the workload
+`test/redaction.sh` records).
 
-**Why no MCP SDK:** jfrdoc 0.3 ran on the official
-[MCP Java SDK](https://github.com/modelcontextprotocol/java-sdk), shipped as a
-~6 MB shaded jar. The Claude plugin directory's security scan can't read
-compiled code, so every version was held for manual review; 0.4 went back to
-a JDK-only server so the plugin can ship as readable source. The SDK had
-originally replaced an even earlier hand-rolled loop whose parser crashed on
-malformed input (a bad `\uXXXX` escape, deeply nested JSON, a non-string
-field where a string was expected). The current server is written against
-exactly those failures: nesting is capped, escapes and numbers are validated
-against the JSON grammar, lines are length-capped while being read, and every
-message is handled inside a catch-all that answers with a JSON-RPC error.
-`test/unit.sh` and `test/smoke.sh` replay each of those inputs, and more,
-against it.
+**Robustness:** every byte on stdin is treated as untrusted. JSON nesting is
+capped, escapes and numbers are validated against the JSON grammar, invalid
+UTF-8 is rejected, lines are length-capped while being read, and every
+message is handled inside a catch-all that answers with a JSON-RPC error —
+one bad line never ends the session. `test/unit.sh` and `test/smoke.sh`
+replay malformed, hostile and oversized input against it.
 
 ## Demo recording
 
@@ -179,12 +181,12 @@ by git, and any recording on disk must contain zero events of those types.
   cancellation are still answered while a call runs. Cancelling a queued call
   drops it; cancelling a running one stops its parse at the next event, so
   the next call doesn't wait behind an abandoned analysis.
-- **A tool call throwing `Error` (not `Exception`)** — e.g. `OutOfMemoryError`
-  on a huge or high-cardinality recording — is caught defensively in
-  `McpServer.executeSafely` and returned as a normal tool error rather than
-  left to propagate. This is untested against a real OOM (no fixture large
-  enough to trigger one was available while writing this); treat it as a
-  defensive measure, not a verified guarantee.
+- **Running out of memory** — a huge or high-cardinality recording can
+  exhaust the JVM heap. The call then returns
+  `Error: <tool> failed (OutOfMemoryError)` and the server keeps serving;
+  checked by running the heaviest tools on a 290 MB recording with a 6 MB
+  heap. The analysis itself is lost, though: give the JVM more memory or
+  record a shorter window.
 - **Report quality tracks the client's model** — the skill pins the structure
   and the interpretation rules, but a weaker model writes a weaker narrative.
 - **Data egress** — tool output includes class names, file paths, socket
@@ -192,8 +194,8 @@ by git, and any recording on disk must contain zero events of those types.
   the model context like any other tool result. JVM startup arguments are
   never passed on verbatim: `jfr_summary` reports switches, heap/GC sizing
   values and well-known `-D` property *names* only, never property values
-  (details in [SECURITY.md](SECURITY.md)). Don't analyze recordings whose metadata you
-  can't share with your model provider.
+  (details in [SECURITY.md](SECURITY.md)). Don't analyze recordings whose
+  metadata you can't share with your model provider.
 - **Recordings contain more than your application** — independently of jfrdoc,
   a `.jfr` captured with JFR's `default` or `profile` settings stores every
   environment variable *with its value* and the full command line of every
@@ -204,8 +206,8 @@ by git, and any recording on disk must contain zero events of those types.
   first. Recording with
   `jdk.InitialEnvironmentVariable#enabled=false,jdk.SystemProcess#enabled=false,jdk.InitialSystemProperty#enabled=false`
   suppresses them at the source, and costs jfrdoc nothing.
-- JFR I/O events are threshold-gated (~10ms): absence of I/O events means no
-  *slow* I/O, not no I/O.
+- JFR I/O events are threshold-gated (10 ms with JFR's `profile` settings,
+  20 ms with `default`): absence of I/O events means no *slow* I/O, not no I/O.
 
 ## License
 

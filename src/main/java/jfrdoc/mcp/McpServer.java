@@ -42,11 +42,10 @@ import jfrdoc.tools.Tool;
 /**
  * MCP server over stdio: newline-delimited JSON-RPC 2.0, JDK only.
  *
- * <p>jfrdoc used to run on the official MCP Java SDK, shipped as a 6 MB shaded
- * jar. It now ships as source that the JDK compiles at startup (see
- * {@code launcher/Launch.java}), so the protocol layer is this class. The SDK
- * had been adopted because an even earlier hand-rolled loop crashed on
- * malformed input; the rules that keep this one from repeating that:
+ * <p>jfrdoc ships as source that the JDK compiles at startup (see
+ * {@code launcher/Launch.java}) and depends on nothing outside the JDK, so
+ * the protocol layer is this class. Every byte on stdin is untrusted input;
+ * the rules that keep malformed or hostile input from taking the server down:
  *
  * <ul>
  *   <li>Every line — reading, decoding and handling it — runs inside a

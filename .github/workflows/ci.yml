@@ -27,7 +27,7 @@ jobs:
       - name: Verify version sync (plugin.json / McpServer.java)
         run: ./ci/check-version-sync.sh
 
-      - name: Run unit tests (JSON parser, JVM-argument sanitizer, server read loop)
+      - name: Run unit tests (JSON parser/writer, JVM-argument sanitizer, redaction, read loop)
         run: ./test/unit.sh
 
       - name: Generate demo recording
@@ -40,6 +40,17 @@ jobs:
       # compiling src/ at startup — so this also catches compile errors.
       - name: Run smoke tests (protocol, malformed input, all 9 tools over stdio)
         run: ./test/smoke.sh
+
+      # Records a workload full of secrets, an email, URL credentials, a
+      # home-directory path and a raw IP, and asserts none reach tool output.
+      - name: Run redaction tests (every SECURITY.md promise, on a real recording)
+        run: ./test/redaction.sh
+
+      - name: Install strace
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq strace
+
+      - name: Verify no network and no file writes (strace)
+        run: ./test/no-egress.sh
 
   validate-plugin:
     runs-on: ubuntu-latest

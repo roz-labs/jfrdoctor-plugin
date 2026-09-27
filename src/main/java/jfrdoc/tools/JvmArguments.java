@@ -14,12 +14,10 @@ import jfrdoc.json.JsonArray;
  * performance report needs, without passing on anything that could be a
  * credential, a path, or other runtime data.
  *
- * <p>Earlier versions sent both strings to the model verbatim, minus a
- * best-effort regex for {@code password=}-style secrets. A flag value can
- * carry any secret in any shape ({@code -Ddb.pwd=…}, {@code --token …},
- * {@code -XX:OnOutOfMemoryError="curl https://user:pass@…"}), so this is an
- * allowlist instead: what survives is chosen by shape, never by guessing
- * which values are secret.
+ * <p>A flag value can carry any secret in any shape ({@code -Ddb.pwd=…},
+ * {@code --token …}, {@code -XX:OnOutOfMemoryError="curl https://user:pass@…"}),
+ * so no pattern can reliably recognize one. This is an allowlist instead: what
+ * survives is chosen by shape, never by guessing which values are secret.
  *
  * <ul>
  *   <li>{@code -XX:+Flag} / {@code -XX:-Flag}: kept.</li>

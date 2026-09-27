@@ -9,9 +9,8 @@
 #   - every file that isn't an image or font under 256 KiB;
 #   - at most 512 files.
 #
-# jfrdoc once shipped a 6 MB compiled jar; it now ships source only, and this
-# check is what keeps a binary from creeping back in. It inspects the files
-# git tracks, since those are what the directory fetches.
+# jfrdoc ships source only, and this check keeps it that way. It inspects the
+# files git tracks, since those are what the directory fetches.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
