@@ -61,7 +61,7 @@ public class JfrSummaryTool implements Tool {
         JsonObject jvmInfo = null;
 
         try (var rf = new RecordingFile(path)) {
-            while (rf.hasMoreEvents()) {
+            while (Tool.hasMoreEvents(rf)) {
                 var e = rf.readEvent();
                 var typeName = e.getEventType().getName();
                 counts.merge(typeName, 1L, Long::sum);
@@ -141,23 +141,25 @@ public class JfrSummaryTool implements Tool {
     }
 
     /**
-     * Redacts credential-shaped -D/--/bare key=value pairs, URL userinfo
-     * credentials, and email addresses from jvmArguments/javaArguments
-     * (verbatim JVM startup + program args, always emitted since they
-     * explain framework/container context) before they reach the model.
-     * Delegates to Redaction so the same patterns are shared with
-     * jfr_exceptions' sample_message. Heuristic, not exhaustive.
+     * JVM identity plus a sanitized view of how it was started. Raw
+     * jvmArguments/javaArguments are never emitted: they can carry secrets
+     * and paths in any shape, so {@link JvmArguments} keeps only an
+     * allowlisted reduction (see its Javadoc).
      */
-    static String redactSecrets(String args) {
-        return Redaction.redactSecretsAndPii(args);
-    }
-
     static JsonObject readJvmInfo(jdk.jfr.consumer.RecordedEvent e) {
         var info = new JsonObject();
         putIfPresent(info, e, "jvmName", "jvmName");
-        putIfPresent(info, e, "jvmVersion", "jvmVersion");
-        putIfPresentRedacted(info, e, "jvmArguments", "jvmArguments");
-        putIfPresentRedacted(info, e, "javaArguments", "javaArguments");
+        if (e.hasField("jvmVersion")) {
+            info.put("jvmVersion", trimBuildInfo(e.getString("jvmVersion")));
+        }
+        if (e.hasField("jvmArguments")) {
+            info.put("jvmFlags", JvmArguments.jvmFlags(e.getString("jvmArguments")));
+        }
+        if (e.hasField("javaArguments")) {
+            String javaArgs = e.getString("javaArguments");
+            info.put("mainClassOrJar", JvmArguments.mainClassOrJar(javaArgs));
+            info.put("programArgumentCount", JvmArguments.programArgumentCount(javaArgs));
+        }
         if (e.hasField("jvmStartTime")) {
             var start = e.getLong("jvmStartTime");
             if (start > 0) {
@@ -167,17 +169,27 @@ public class JfrSummaryTool implements Tool {
         return info;
     }
 
+    /**
+     * HotSpot's version string ends in {@code , built on <date> by "<user>"
+     * with <compiler>}, and a locally built JDK's version itself carries the
+     * builder too ({@code 21-internal-adhoc.<user>.<dir>}, OpenJDK's default
+     * VERSION_OPT). Everything from ", built on" is dropped and the adhoc
+     * segment reads {@code adhoc.<omitted>}.
+     */
+    static String trimBuildInfo(String version) {
+        if (version == null) return null;
+        int cut = version.indexOf(", built on");
+        String trimmed = cut < 0 ? version : version.substring(0, cut);
+        return ADHOC_BUILD.matcher(trimmed).replaceAll("adhoc.<omitted>");
+    }
+
+    private static final java.util.regex.Pattern ADHOC_BUILD =
+            java.util.regex.Pattern.compile("adhoc\\.[^)\\s,]*");
+
     static void putIfPresent(JsonObject target, jdk.jfr.consumer.RecordedEvent e, String field, String jsonKey) {
         if (e.hasField(field)) {
             var v = e.getString(field);
             if (v != null && !v.isEmpty()) target.put(jsonKey, v);
-        }
-    }
-
-    static void putIfPresentRedacted(JsonObject target, jdk.jfr.consumer.RecordedEvent e, String field, String jsonKey) {
-        if (e.hasField(field)) {
-            var v = e.getString(field);
-            if (v != null && !v.isEmpty()) target.put(jsonKey, redactSecrets(v));
         }
     }
 }

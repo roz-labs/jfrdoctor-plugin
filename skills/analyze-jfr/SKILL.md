@@ -19,9 +19,12 @@ they feed.
   (`find`, broad `ls`) first; only fall back to that if the first call
   reports the file as not found.
 - **Framework** — `spring`, `quarkus`, or `other`. Infer it: `jfr_summary`'s
-  `jvm.javaArguments`/`jvmArguments` usually reveal the app (a Spring Boot jar,
-  a Quarkus runner). State the inferred value in the report; only ask if truly
-  ambiguous.
+  `jvm.mainClassOrJar` and `jvm.jvmFlags` usually reveal the app (a Spring Boot
+  jar, a Quarkus runner). State the inferred value in the report; only ask if
+  truly ambiguous. `jvmFlags` is sanitized: well-known `-D` properties appear
+  by name only, other properties and non-tuning flag values read `<omitted>`,
+  and `mainClassOrJar` may be absent — that is by design, not missing data, so
+  never ask the user to supply the omitted values.
 - **Container limits** — memory/CPU limits, if the user provides them. Pass the
   memory limit to `jfr_memory` as `container_memory_mb` (integer MB). If not
   provided, note in the report that container-fit analysis was not possible.
@@ -74,7 +77,7 @@ section collapses to a fixed one-liner.
 - **File**: [path]
 - **Duration**: [seconds] s
 - **JVM**: [name] [version]
-- **OS**: [os name and arch]
+- **OS**: [os and arch — the `for <os>-<arch>` part of `jvm.jvmVersion`, e.g. linux-amd64]
 - **Framework**: [framework]
 - **Container limits**: memory=[value] cpu=[value]
 - **Total events captured**: [number]
@@ -194,8 +197,8 @@ If after filtering there are no notable park sites: "All thread parking matches 
 CRITICAL — check event_availability BEFORE interpreting a zero count. JFR's
 stock "default" and "profile" settings profiles disable
 jdk.JavaExceptionThrow (jdk.JavaErrorThrow stays on). A count of 0 means
-completely different things depending on event_availability.java_exception
-_throw_enabled:
+completely different things depending on
+`event_availability.java_exception_throw_enabled`:
 - If false: jdk.JavaExceptionThrow was NOT recording. Write: "Exception
   throws were not captured — jdk.JavaExceptionThrow was disabled in this
   recording (JFR's default/profile settings turn it off). Re-record with
@@ -239,13 +242,13 @@ N. `<site>` — <events> events (<pct_of_total>%, <category>), dominant exceptio
 
 [If jfr_io was NOT called: "No I/O events captured in this recording." Skip rest.
 
-If called and signals.io_data_likely_sparse is true (< 10 events): "Minimal slow-I/O activity captured (<N> events). Note: JFR only records I/O operations exceeding ~10ms; this application's I/O is either fast (below threshold) or in-memory. No I/O bottleneck detected." Skip the sub-sections.
+If called and signals.io_data_likely_sparse is true (< 10 events): "Minimal slow-I/O activity captured (<N> events). Note: JFR only records I/O operations exceeding its threshold (10 ms with the profile settings, 20 ms with default); this application's I/O is either fast (below threshold) or in-memory. No I/O bottleneck detected." Skip the sub-sections.
 
 Otherwise: 2-4 sentences. Cover:
 1. Total I/O blocking time and which type dominates (file vs socket), citing summary.total_io_blocking_time_ms and dominant_io_type.
 2. If significant_socket_io and single_endpoint_dominant: name the dominant endpoint and its total time — this is likely a database or downstream service. Frame as "the application spends X ms blocked on <endpoint>".
 3. If repeated_file_access: name the repeatedly-read file — likely a missing cache (config reload, template re-read).
-4. ALWAYS include the threshold caveat: remind the reader that only slow I/O (>~10ms) is captured, so this shows bottlenecks not total I/O volume.
+4. ALWAYS include the threshold caveat: remind the reader that only slow I/O (above JFR's 10–20 ms threshold) is captured, so this shows bottlenecks not total I/O volume.
 
 ### Top I/O Targets
 [Combine the most significant entries from top_endpoints_by_time and top_files_by_time, sorted by total_time_ms desc, top 5 overall. Format:
@@ -280,7 +283,7 @@ If there are no findings, write: "No code or configuration changes recommended b
 ## Analysis Limitations
 This build analyzes CPU samples, GC behavior, object allocation, total memory footprint (with NMT for per-category native breakdown), lock contention / thread parking, exception throws (per-class breakdown), file/socket I/O wait, and JVM native-method execution (blocked-in-syscall / JNI). The following are NOT yet covered and would change the picture if data is available:
 - Class loading and JIT compilation overhead
-- Note: I/O analysis covers only operations exceeding ~10ms; high-frequency fast I/O is aggregated in CPU/allocation profiles instead
+- Note: I/O analysis covers only operations exceeding JFR's I/O threshold (10 ms with the profile settings, 20 ms with default); high-frequency fast I/O is aggregated in CPU/allocation profiles instead
 - Note: jdk.JavaExceptionThrow is disabled under JFR's default/profile settings profiles (see jfr_exceptions.event_availability). When disabled, exception-throw activity is not observable in this recording regardless of what actually happened in the application.
 
 [If container memory/CPU limits were not provided, add: "Container limits were not provided; container-fit analysis is not possible. Share the container's memory and CPU limits for a fuller assessment."]
@@ -314,7 +317,7 @@ This build analyzes CPU samples, GC behavior, object allocation, total memory fo
     - For NoSuchMethodError, NoSuchFieldError, or other LinkageError thrown from JDK-category code (top_site_category "jdk", typically java.lang.invoke.* or similar bootstrap internals) with control_flow_smell false: this is normal method-handle/invokedynamic linkage probing, not a bug — do NOT add a Findings bullet for it. Mention it at most as 🔵 informational in Top Exception Classes.
     - For any other Error subclass, or any Error thrown from user_code or framework code (not jdk): treat as a finding — Errors outside JDK-internal linkage are unusual and worth surfacing.
 14. I/O event interpretation:
-    - JFR I/O events are threshold-gated (~10ms default). Absence of I/O events means no SLOW I/O — NOT no I/O. Never conclude "the application does no I/O" or "I/O is not a factor" from few/zero events; conclude "no slow I/O bottleneck detected."
+    - JFR I/O events are threshold-gated (10 ms with the profile settings, 20 ms with default). Absence of I/O events means no SLOW I/O — NOT no I/O. Never conclude "the application does no I/O" or "I/O is not a factor" from few/zero events; conclude "no slow I/O bottleneck detected."
     - When socket I/O concentrates on a single endpoint with a database port (5432=PostgreSQL, 3306=MySQL, 1521=Oracle, 27017=MongoDB, 6379=Redis, 9042=Cassandra), the cumulative wait time is the key signal — frame it as database latency / chattiness, and suggest investigating query patterns (N+1, missing indexes) before blaming the network.
     - For in-memory-database applications (H2, embedded), expect little or no socket I/O — this is normal and not a finding.
 15. Native-method sample interpretation (jdk.NativeMethodSample):

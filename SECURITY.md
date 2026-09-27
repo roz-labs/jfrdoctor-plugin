@@ -7,29 +7,33 @@ returns aggregated JSON over MCP stdio to the calling Claude Code session.
 It makes no outbound network connections and has no telemetry.
 
 - **True by construction.** `src/main/java` has no imports of `java.net.*`,
-  `javax.net.*`, or `java.rmi.*` — the only file I/O is reading the `.jfr`
-  you name via `jdk.jfr.consumer.RecordingFile`. Verify yourself:
-  `grep -rn "java\.net\." src/main/java`.
-- **True of the shipped jar's active code path.** jfrdoc's build depends on
-  one third-party library, the MCP Java SDK
-  (`io.modelcontextprotocol.sdk:mcp`), which bundles HTTP/SSE client and
-  server transports for callers who need them. jfrdoc only ever constructs
-  `StdioServerTransportProvider` (see `src/main/java/jfrdoc/mcp/McpServer.java`)
-  — those transports are never instantiated, and `pom.xml`'s shade-plugin
-  filters exclude the confirmed-dead client package and HTTP/SSE
-  server-transport classes from the shipped `lib/jfrdoc-mcp.jar` so they
-  aren't even present to be misused. (Project Reactor is bundled and *is*
-  used — it's a direct dependency of the stdio transport itself, not of any
-  HTTP path.)
+  `javax.net.*`, or `java.rmi.*`, and neither it nor the launcher uses any
+  environment-variable, process or network API. Apart from the plugin's own
+  source and resource files, the only file read is the `.jfr` you name, via
+  `jdk.jfr.consumer.RecordingFile`. The launcher's `java.net.URL`/`URI` are
+  local file handles for its in-memory compiler and resource lookup, not
+  networking.
+- **Checked at the system-call level.** `test/no-egress.sh` runs the server
+  and all nine tools under `strace` and fails on any IPv4/IPv6
+  `connect`/`bind`/`send` or any file opened for writing; CI runs it on every
+  push.
+- **Nothing compiled, nothing downloaded.** The plugin ships only readable
+  source and depends on nothing outside the JDK. `launcher/Launch.java`
+  compiles `src/main/java` in memory with the JDK's own compiler each time
+  the server starts, and resolves classes and resources from the plugin's
+  own tree — never the classpath or your working directory (the manifest
+  pins `-cp` to the launcher folder for the same reason). There is no
+  package install, no download, and no file written to disk
+  (`-XX:-UsePerfData` also stops the JVM's `hsperfdata` temp file).
 
 ## What data flows to your model, and why
 
 jfrdoc's tools parse the `.jfr` file you name and return an aggregate: class
 and method names, aggregate counts and durations, file paths and socket
-endpoints touched by the profiled process, JVM startup arguments, and sample
-exception messages. This is inherent to what the tools do — class/method
-names are the tools' actual purpose (identifying hotspots, allocation sites,
-throwing sites) and are never redacted.
+endpoints touched by the profiled process, a sanitized view of the JVM's
+startup flags, and sample exception messages. This is inherent to what the
+tools do — class/method names are the tools' actual purpose (identifying
+hotspots, allocation sites, throwing sites) and are never redacted.
 
 What's *not* inherent — data the profiled application's own runtime state
 can incidentally carry, unrelated to code structure — is minimized:
@@ -38,34 +42,53 @@ can incidentally carry, unrelated to code structure — is minimized:
   application's own exception text is freeform and can embed emails,
   credentials, or connection strings. Redacted for email addresses,
   key=value secrets (password/secret/token/credential/api-key/auth-shaped
-  keys), and URL userinfo credentials before being included, truncated to
-  120 characters.
+  keys), and URL userinfo credentials before being included, then cut to
+  120 characters (plus an ellipsis).
 - **File paths** (`jfr_io`'s `top_files_by_time`, `repeated_file_path`,
   `slowest_operation_target`): OS home-directory username segments
   (`/home/<user>/…`, `/Users/<user>/…`, `C:\Users\<user>\…`) are masked. The
   rest of the path — including the filename, which is the tool's actual
   diagnostic payload (which file is slow) — is left intact.
-- **Socket addresses** (`jfr_io`'s `address` field): the last octet of a raw
-  IPv4 address is masked. Hostnames (`host`/`endpoint`) are deliberately
-  *not* touched — they're the tool's core diagnostic signal (which service
-  is slow, which database is chatty) and are organizational infrastructure
-  information, not personal data; masking them would make the tool useless
-  for its stated purpose.
-- **JVM/program arguments** (`jfr_summary`'s `jvmArguments`/`javaArguments`):
-  redacted with the same email/secret/URL-userinfo patterns as exception
-  messages, on top of the original narrower `-D…password=…`-style check.
+- **Socket addresses** (`jfr_io`'s `address` and `endpoint` fields, and
+  `slowest_operation_target`): the last octet of an IPv4 address is masked,
+  including when the endpoint is named by its IP because reverse DNS had no
+  answer. Hostnames are deliberately *not* touched — they're the tool's core
+  diagnostic signal (which service is slow, which database is chatty) and are
+  organizational infrastructure information, not personal data; masking them
+  would make the tool useless for its stated purpose.
+- **JVM/program arguments** (`jfr_summary`'s `jvm` block): never sent
+  verbatim. A command line can carry a secret in any shape, so instead of
+  guessing which values are secret, jfrdoc keeps only what it can prove is
+  safe by shape: `-XX:+Flag` switches, heap sizes (`-Xmx512m`), numeric
+  values of known sizing/GC flags (`MaxRAMPercentage=75.0`), `-D` property
+  *names* (never values) under well-known JDK/framework namespaces, agent
+  file names ending in `.jar`/`.so`/`.dll`/`.dylib` without their options,
+  and the names of standard launcher options. Every other value reads
+  `<omitted>` — other `-D` properties read `-D<omitted>`; paths, classpath
+  entries and unrecognized tokens are dropped. Of the program arguments,
+  only the main class or jar file name and a count are reported, and
+  neither when a jar path was split by a space. The JVM version string is
+  cut before its `built on … by "<user>"` part, and a locally built JDK's
+  `adhoc.<user>` version segment is masked. See
+  `src/main/java/jfrdoc/tools/JvmArguments.java`.
 - **Error responses**: every tool-call error returns only the failing
   exception's class name, never its message text, so a malformed or
   adversarial recording can't smuggle file content into an error string.
   The `path` a tool echoes back matches what you passed in — jfrdoc never
   resolves it to an absolute filesystem path on your behalf.
 
-**None of this is exhaustive.** These are pattern-based, best-effort
-measures against well-defined shapes (an email address, a `key=value`
-secret, a home-directory username, an IPv4 octet) — they will not catch
-every way a person's name, a customer identifier, or a secret can appear in
-freeform application text. Two things are true regardless of jfrdoc's own
-processing:
+Every item above is checked end to end by `test/redaction.sh`, which records
+a workload that puts secrets, an email, URL credentials, a home-directory
+path and a raw IP address into a real recording and asserts that none of
+them reach any tool's output; `test/unit.sh` covers the same rules case by
+case. Both run in CI.
+
+**None of the pattern-based measures is exhaustive.** Apart from the JVM
+argument allowlist, these are best-effort measures against well-defined
+shapes (an email address, a `key=value` secret, a home-directory username,
+an IPv4 octet) — they will not catch every way a person's name, a customer
+identifier, or a secret can appear in freeform application text. Two things
+are true regardless of jfrdoc's own processing:
 
 1. Class names, method names, and thread/stack structure are shown in full
    — if your codebase's own naming carries information you don't want
@@ -84,6 +107,7 @@ processing:
 Please report security issues privately using GitHub's "Report a
 vulnerability" feature under this repository's Security tab, rather than
 opening a public issue. jfrdoc is a local-only tool with no hosted service,
-so most legitimate reports will concern the shipped jar's bundled
-dependencies, the MCP protocol boundary, or a gap in the redaction behavior
-described above.
+so most legitimate reports will concern the MCP protocol boundary
+(`src/main/java/jfrdoc/mcp/McpServer.java`,
+`src/main/java/jfrdoc/json/JsonParser.java`), the launcher, or a gap in the
+redaction behavior described above.

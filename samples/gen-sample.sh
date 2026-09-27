@@ -7,13 +7,10 @@
 # since JFR's stock profile/default settings disable it — see jfr_exceptions'
 # event_availability field). Requires JDK 21+ on PATH.
 #
-# An earlier version of this script used Java's single-file source-launch
-# mode (`java Foo.java`), which runs under the javac launcher and pollutes
-# jvmArguments/javaArguments with launcher internals instead of a normal
-# app — and used one thread doing only allocation, giving almost no CPU
-# samples. This version compiles then runs normally, with a dedicated
-# always-on-CPU thread so jdk.ExecutionSample has enough density to be
-# useful in the demo report.
+# The workload is compiled and then run as a normal application (not with
+# `java Foo.java`, which would make the recording describe the source
+# launcher instead of the app), and a dedicated always-on-CPU thread gives
+# jdk.ExecutionSample enough density to be useful in the demo report.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -222,9 +219,9 @@ javac -d "$WORKDIR" "$WORKDIR/JfrLoad.java"
 # machine, not just this workload: environment variables with their VALUES, and the
 # full command line of every process on the host. A recording made on a developer
 # box or in CI therefore carries credentials, tokens and private paths that have
-# nothing to do with the demo — an earlier version of this sample leaked exactly
-# that. None of jfrdoc's nine tools read these three event types (they take JVM
-# arguments from jdk.JVMInformation instead), so turning them off costs nothing.
+# nothing to do with the demo. None of jfrdoc's nine tools read these three event
+# types (they take JVM arguments from jdk.JVMInformation instead), so turning them
+# off costs nothing.
 # ci/check-sample-privacy.sh enforces that they stay off.
 java -XX:NativeMemoryTracking=summary \
      -XX:StartFlightRecording=duration=30s,filename="$PWD/sample.jfr",settings=profile,jdk.JavaExceptionThrow#enabled=true,jdk.InitialEnvironmentVariable#enabled=false,jdk.SystemProcess#enabled=false,jdk.InitialSystemProperty#enabled=false \

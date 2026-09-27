@@ -4,8 +4,8 @@ import java.util.regex.Pattern;
 
 /**
  * Best-effort redaction for personal/secret data that can appear in freeform
- * strings surfaced by JFR tools: application exception messages, JVM/program
- * arguments, and file paths from the profiled application. This is
+ * strings surfaced by JFR tools: application exception messages and file
+ * paths from the profiled application. This is
  * deliberately separate from the aggregate code-structure data (class and
  * method names) that is these tools' actual purpose and is never redacted —
  * only data that originates from the profiled application's runtime state
@@ -41,9 +41,8 @@ final class Redaction {
 
     /**
      * Redacts secret-shaped key=value pairs, URL userinfo credentials, and
-     * email addresses from a freeform string. Used for JVM/program arguments
-     * and application exception messages — both can carry any of these in
-     * any position, not just where an earlier, narrower check used to look.
+     * email addresses from a freeform string. Used for application exception
+     * messages, which can carry any of these in any position.
      */
     static String redactSecretsAndPii(String s) {
         if (s == null) return null;

@@ -9,9 +9,9 @@
 #   jdk.InitialSystemProperty       every -D system property
 #
 # A recording made on a developer box or in CI therefore contains credentials,
-# API tokens, session identifiers and private filesystem paths. This repo shipped
-# exactly such a recording once; samples/gen-sample.sh now disables all three, and
-# this script is what keeps them off.
+# API tokens, session identifiers and private filesystem paths.
+# samples/gen-sample.sh disables all three, and this script is what keeps them
+# off.
 #
 # Two independent assertions:
 #   1. No .jfr file is tracked by git at all. Recordings are generated locally

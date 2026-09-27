@@ -10,8 +10,8 @@ import java.util.Set;
 
 /**
  * Buckets a fully-qualified class name into user_code / framework / jdk using
- * package-prefix lists shipped as classpath resources (/frameworks/*.txt),
- * so the jar is self-contained regardless of working directory.
+ * package-prefix lists loaded as classpath resources (/frameworks/*.txt,
+ * from src/main/resources), so lookup never depends on the working directory.
  */
 public record FrameworkCategorizer(
         Set<String> alwaysFramework,
