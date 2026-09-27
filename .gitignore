@@ -1,8 +1,10 @@
-# Build outputs (lib/jfrdoc-mcp.jar IS committed so the plugin works on install)
+# Build outputs. The plugin ships source only — launcher/Launch.java compiles
+# it in memory at startup — so no compiled code is ever committed
+# (ci/check-plugin-files.sh fails the build if a binary is tracked).
 target/
 build/
 *.class
-dependency-reduced-pom.xml
+*.jar
 
 # JFR recordings are NEVER committed. A recording captures host environment
 # variables (with values) and the full system process table, so it carries

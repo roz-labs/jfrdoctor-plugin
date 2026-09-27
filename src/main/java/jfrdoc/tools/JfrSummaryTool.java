@@ -141,23 +141,23 @@ public class JfrSummaryTool implements Tool {
     }
 
     /**
-     * Redacts credential-shaped -D/--/bare key=value pairs, URL userinfo
-     * credentials, and email addresses from jvmArguments/javaArguments
-     * (verbatim JVM startup + program args, always emitted since they
-     * explain framework/container context) before they reach the model.
-     * Delegates to Redaction so the same patterns are shared with
-     * jfr_exceptions' sample_message. Heuristic, not exhaustive.
+     * JVM identity plus a sanitized view of how it was started. Raw
+     * jvmArguments/javaArguments are never emitted: they can carry secrets
+     * and paths in any shape, so {@link JvmArguments} keeps only an
+     * allowlisted reduction (see its Javadoc).
      */
-    static String redactSecrets(String args) {
-        return Redaction.redactSecretsAndPii(args);
-    }
-
     static JsonObject readJvmInfo(jdk.jfr.consumer.RecordedEvent e) {
         var info = new JsonObject();
         putIfPresent(info, e, "jvmName", "jvmName");
         putIfPresent(info, e, "jvmVersion", "jvmVersion");
-        putIfPresentRedacted(info, e, "jvmArguments", "jvmArguments");
-        putIfPresentRedacted(info, e, "javaArguments", "javaArguments");
+        if (e.hasField("jvmArguments")) {
+            info.put("jvmFlags", JvmArguments.jvmFlags(e.getString("jvmArguments")));
+        }
+        if (e.hasField("javaArguments")) {
+            String javaArgs = e.getString("javaArguments");
+            info.put("mainClassOrJar", JvmArguments.mainClassOrJar(javaArgs));
+            info.put("programArgumentCount", JvmArguments.programArgumentCount(javaArgs));
+        }
         if (e.hasField("jvmStartTime")) {
             var start = e.getLong("jvmStartTime");
             if (start > 0) {
@@ -171,13 +171,6 @@ public class JfrSummaryTool implements Tool {
         if (e.hasField(field)) {
             var v = e.getString(field);
             if (v != null && !v.isEmpty()) target.put(jsonKey, v);
-        }
-    }
-
-    static void putIfPresentRedacted(JsonObject target, jdk.jfr.consumer.RecordedEvent e, String field, String jsonKey) {
-        if (e.hasField(field)) {
-            var v = e.getString(field);
-            if (v != null && !v.isEmpty()) target.put(jsonKey, redactSecrets(v));
         }
     }
 }

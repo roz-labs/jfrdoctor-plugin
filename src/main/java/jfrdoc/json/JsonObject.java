@@ -1,8 +1,9 @@
 package jfrdoc.json;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Minimal ordered JSON object. Covers exactly the surface the jfrdoc tools and
@@ -51,30 +52,26 @@ public final class JsonObject {
         throw new JsonException("not a number: " + key);
     }
 
+    /** The value for {@code key}, or Java null when absent (JSON null is {@link #NULL}). */
+    public Object opt(String key) {
+        return values.get(key);
+    }
+
+    public Set<String> keys() {
+        return Collections.unmodifiableSet(values.keySet());
+    }
+
     /**
-     * Adapts an MCP tool-call arguments map (as handed to us by the SDK's JSON
-     * binding) into a JsonObject, so the nine Tool implementations keep reading
-     * arguments through the same typed accessors regardless of transport.
-     * A JSON null value is treated as absent, matching JSON Schema's "optional"
-     * semantics rather than failing has()/get() on an explicit null.
+     * A shallow copy without JSON-null members. Tool arguments go through this
+     * so an explicit {@code "top_n": null} reads as "not given", matching JSON
+     * Schema's optional semantics rather than failing a typed accessor.
      */
-    @SuppressWarnings("unchecked")
-    public static JsonObject fromMap(Map<String, Object> map) {
-        var obj = new JsonObject();
-        for (var entry : map.entrySet()) {
-            Object value = entry.getValue();
-            if (value == null) continue;
-            if (value instanceof Map<?, ?> nested) {
-                obj.put(entry.getKey(), fromMap((Map<String, Object>) nested));
-            } else if (value instanceof List<?> list) {
-                var arr = new JsonArray();
-                list.forEach(arr::put);
-                obj.put(entry.getKey(), arr);
-            } else {
-                obj.put(entry.getKey(), value);
-            }
-        }
-        return obj;
+    public JsonObject withoutNulls() {
+        var copy = new JsonObject();
+        values.forEach((k, v) -> {
+            if (v != NULL) copy.put(k, v);
+        });
+        return copy;
     }
 
     @Override

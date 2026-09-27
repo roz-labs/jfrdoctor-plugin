@@ -10,26 +10,21 @@ It makes no outbound network connections and has no telemetry.
   `javax.net.*`, or `java.rmi.*` — the only file I/O is reading the `.jfr`
   you name via `jdk.jfr.consumer.RecordingFile`. Verify yourself:
   `grep -rn "java\.net\." src/main/java`.
-- **True of the shipped jar's active code path.** jfrdoc's build depends on
-  one third-party library, the MCP Java SDK
-  (`io.modelcontextprotocol.sdk:mcp`), which bundles HTTP/SSE client and
-  server transports for callers who need them. jfrdoc only ever constructs
-  `StdioServerTransportProvider` (see `src/main/java/jfrdoc/mcp/McpServer.java`)
-  — those transports are never instantiated, and `pom.xml`'s shade-plugin
-  filters exclude the confirmed-dead client package and HTTP/SSE
-  server-transport classes from the shipped `lib/jfrdoc-mcp.jar` so they
-  aren't even present to be misused. (Project Reactor is bundled and *is*
-  used — it's a direct dependency of the stdio transport itself, not of any
-  HTTP path.)
+- **Nothing compiled, nothing downloaded.** The plugin ships only readable
+  source and depends on nothing outside the JDK. `launcher/Launch.java`
+  compiles `src/main/java` in memory with the JDK's own compiler each time
+  the server starts, and resolves classes and resources from the plugin's
+  own tree — never the classpath or your working directory. There is no
+  package install, no download, and no file written to disk.
 
 ## What data flows to your model, and why
 
 jfrdoc's tools parse the `.jfr` file you name and return an aggregate: class
 and method names, aggregate counts and durations, file paths and socket
-endpoints touched by the profiled process, JVM startup arguments, and sample
-exception messages. This is inherent to what the tools do — class/method
-names are the tools' actual purpose (identifying hotspots, allocation sites,
-throwing sites) and are never redacted.
+endpoints touched by the profiled process, a sanitized view of the JVM's
+startup flags, and sample exception messages. This is inherent to what the
+tools do — class/method names are the tools' actual purpose (identifying
+hotspots, allocation sites, throwing sites) and are never redacted.
 
 What's *not* inherent — data the profiled application's own runtime state
 can incidentally carry, unrelated to code structure — is minimized:
@@ -51,18 +46,26 @@ can incidentally carry, unrelated to code structure — is minimized:
   is slow, which database is chatty) and are organizational infrastructure
   information, not personal data; masking them would make the tool useless
   for its stated purpose.
-- **JVM/program arguments** (`jfr_summary`'s `jvmArguments`/`javaArguments`):
-  redacted with the same email/secret/URL-userinfo patterns as exception
-  messages, on top of the original narrower `-D…password=…`-style check.
+- **JVM/program arguments** (`jfr_summary`'s `jvm` block): never sent
+  verbatim. A command line can carry a secret in any shape, so instead of
+  guessing which values are secret, jfrdoc keeps only what it can prove is
+  safe by shape: `-XX:+Flag` switches, numeric values (`-Xmx512m`,
+  `MaxRAMPercentage=75.0`), `-D` property *names* without values, agent jar
+  file names without options, and the names of standard launcher options.
+  Every other value reads `<omitted>`; paths, classpath entries and
+  unrecognized tokens are dropped. Of the program arguments, only the main
+  class or jar file name and a count are reported. See
+  `src/main/java/jfrdoc/tools/JvmArguments.java`.
 - **Error responses**: every tool-call error returns only the failing
   exception's class name, never its message text, so a malformed or
   adversarial recording can't smuggle file content into an error string.
   The `path` a tool echoes back matches what you passed in — jfrdoc never
   resolves it to an absolute filesystem path on your behalf.
 
-**None of this is exhaustive.** These are pattern-based, best-effort
-measures against well-defined shapes (an email address, a `key=value`
-secret, a home-directory username, an IPv4 octet) — they will not catch
+**None of the pattern-based measures is exhaustive.** Apart from the JVM
+argument allowlist, these are best-effort measures against well-defined
+shapes (an email address, a `key=value` secret, a home-directory username,
+an IPv4 octet) — they will not catch
 every way a person's name, a customer identifier, or a secret can appear in
 freeform application text. Two things are true regardless of jfrdoc's own
 processing:
@@ -84,6 +87,7 @@ processing:
 Please report security issues privately using GitHub's "Report a
 vulnerability" feature under this repository's Security tab, rather than
 opening a public issue. jfrdoc is a local-only tool with no hosted service,
-so most legitimate reports will concern the shipped jar's bundled
-dependencies, the MCP protocol boundary, or a gap in the redaction behavior
-described above.
+so most legitimate reports will concern the MCP protocol boundary
+(`src/main/java/jfrdoc/mcp/McpServer.java`,
+`src/main/java/jfrdoc/json/JsonParser.java`), the launcher, or a gap in the
+redaction behavior described above.

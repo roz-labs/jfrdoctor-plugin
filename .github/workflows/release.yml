@@ -36,23 +36,12 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      # Mirrors ci/check-version-sync.sh's exact pom.xml parsing (same
-      # namespace, same find(), same .text.strip()) so this never drifts
-      # from what that script considers authoritative.
-      - name: Extract version from pom.xml
+      # Mirrors ci/check-version-sync.sh, which treats plugin.json as the
+      # authoritative version.
+      - name: Extract version from plugin.json
         id: version
         run: |
-          VERSION="$(python3 - <<'PY'
-          import sys
-          import xml.etree.ElementTree as ET
-          ns = {"m": "http://maven.apache.org/POM/4.0.0"}
-          root = ET.parse("pom.xml").getroot()
-          el = root.find("m:version", ns)
-          if el is None or not el.text:
-              sys.exit("ERROR: could not find /project/version in pom.xml")
-          print(el.text.strip())
-          PY
-          )"
+          VERSION="$(python3 -c 'import json; print(json.load(open(".claude-plugin/plugin.json"))["version"])')"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $VERSION"
 
@@ -68,14 +57,13 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Cheap safety re-checks before tagging. No Maven/JDK build needed —
-      # CI already ran the full build.sh/check-jar-freshness.sh cycle on
-      # this exact commit; these two just re-assert the two properties that
-      # matter for a *release* specifically: the shipped jar's checksum is
-      # correct, and the three version declarations agree.
-      - name: Re-verify committed jar checksum
+      # Cheap safety re-checks before tagging. No JDK needed — CI already
+      # compiled and exercised this exact commit; these re-assert the two
+      # properties that matter for a *release* specifically: the plugin ships
+      # only readable source, and the version declarations agree.
+      - name: Re-verify plugin files are readable source
         if: steps.check.outputs.exists == 'false'
-        run: sha256sum -c lib/jfrdoc-mcp.jar.sha256
+        run: ./ci/check-plugin-files.sh
 
       - name: Re-verify version sync
         if: steps.check.outputs.exists == 'false'

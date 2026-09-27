@@ -17,6 +17,14 @@ public final class JsonArray {
         return values.isEmpty();
     }
 
+    public int size() {
+        return values.size();
+    }
+
+    public Object get(int index) {
+        return values.get(index);
+    }
+
     @Override
     public String toString() {
         var sb = new StringBuilder();

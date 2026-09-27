@@ -19,9 +19,11 @@ they feed.
   (`find`, broad `ls`) first; only fall back to that if the first call
   reports the file as not found.
 - **Framework** — `spring`, `quarkus`, or `other`. Infer it: `jfr_summary`'s
-  `jvm.javaArguments`/`jvmArguments` usually reveal the app (a Spring Boot jar,
-  a Quarkus runner). State the inferred value in the report; only ask if truly
-  ambiguous.
+  `jvm.mainClassOrJar` and `jvm.jvmFlags` usually reveal the app (a Spring Boot
+  jar, a Quarkus runner). State the inferred value in the report; only ask if
+  truly ambiguous. `jvmFlags` is sanitized: `-D` properties appear by name only
+  and non-numeric flag values read `<omitted>` — that is by design, not missing
+  data, so never ask the user to supply the omitted values.
 - **Container limits** — memory/CPU limits, if the user provides them. Pass the
   memory limit to `jfr_memory` as `container_memory_mb` (integer MB). If not
   provided, note in the report that container-fit analysis was not possible.
